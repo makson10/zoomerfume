@@ -1,0 +1,35 @@
+# ── Dev overrides ────────────────────────────────────────────────────────
+# Auto-loaded by `docker compose up` for local dev:
+#
+#   docker compose up --build --watch
+#
+# Passing `-f docker-compose.yml` explicitly disables auto-loading of this file:
+#
+#   docker compose -f docker-compose.yml up -d --build
+
+services:
+    api:
+        command: ["python", "-m", "uvicorn", "app.main:app",
+                  "--host", "0.0.0.0", "--port", "8000", "--reload"]
+        develop:
+            watch:
+                - action: sync
+                  path: ./backend/app
+                  target: /app/app
+                  ignore:
+                      - __pycache__/
+                      - "*.pyc"
+
+                - action: rebuild
+                  path: ./backend/pyproject.toml
+
+                - action: rebuild
+                  path: ./backend/uv.lock
+
+    qdrant:
+        ports:
+            - "6333:6333" # REST API
+
+    postgres:
+        ports:
+            - "5432:5432" # local psql / DB tooling

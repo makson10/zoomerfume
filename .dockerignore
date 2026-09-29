@@ -1,0 +1,43 @@
+# Python cache
+**/__pycache__/
+**/*.py[cod]
+
+# Virtual environments
+**/.venv/
+**/venv/
+
+# Tests & coverage
+**/.pytest_cache/
+**/.coverage
+**/htmlcov/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# Runtime data (local SQLite sessions)
+backend/data/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Environment files (NEVER bake real secrets into the image)
+.env
+.env.*
+
+# Version control
+.git/
+.gitignore
+
+# Documentation
+docs/
+**/*.md
+
+# Docker files (not needed inside image)
+docker-compose*.yml
+Dockerfile
+.dockerignore
+
+# OS
+**/.DS_Store
+Thumbs.db
