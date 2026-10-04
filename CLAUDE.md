@@ -43,7 +43,7 @@ writes collections yet.
   - `core/`: settings, logging setup
   - `db/`: SQLAlchemy engine, models, fail-open write guard, message log
   - `middleware/`: per-request logging context
-  - `services/`: shared OpenAI and Qdrant clients
+  - `services/`: OpenAI and Qdrant client constructors
 - `backend/alembic/`: database migrations (`versions/0001_messages.py`, ...)
 - `backend/scripts/entrypoint.sh`: container entrypoint
 - `backend/pyproject.toml`, `backend/uv.lock`: the uv project (Python 3.12)
@@ -52,8 +52,9 @@ writes collections yet.
 
 ## Entry Points
 
-- ASGI app: `app.main:app`. The image runs it with uvicorn
-  (`--loop uvloop --no-access-log`); the dev override swaps in `--reload`.
+- ASGI app: the `app.main:create_app` factory. The image runs it with
+  `uvicorn --factory` (`--loop uvloop --no-access-log`); the dev override swaps in
+  `--reload`.
 - Container start: `backend/scripts/entrypoint.sh` runs `alembic upgrade head`,
   then `exec`s the command. A failed migration stops the container.
 - HTTP API:
@@ -108,18 +109,19 @@ A chat turn goes through these steps:
 write to 5 seconds, and logs and swallows any error. A database problem must never
 break a chat turn.
 
-**Startup and shutdown.** Startup (`lifespan` in `app/main.py`) pings Postgres and
-Qdrant; if either is down, it logs the error and keeps starting. Shutdown closes the shared
-clients and disposes the engine. `GET /health` is a liveness check that always
-returns `{"status": "ok"}`.
+**Startup and shutdown.** `create_app(settings=None)` (`app/main.py`) loads the
+settings (or takes the ones passed in), sets up logging and stores the settings on
+`app.state`. Nothing runs at import time. The lifespan creates the OpenAI and
+Qdrant clients and the SQLAlchemy engine, points the Agents SDK at the app's own
+`AsyncOpenAI` client through `set_default_openai_client`, and stores one
+`TurnRunner` on `app.state`. It then pings Postgres and Qdrant; if either is down,
+it logs the error and keeps starting. Shutdown closes the clients and disposes the
+engine. `GET /health` is a liveness check that always returns `{"status": "ok"}`.
 
-**Singletons.** `get_settings()` is `lru_cache`d, and `app/main.py` and
-`app/db/engine.py` read it at import time (`settings = get_settings()`). The OpenAI
-and Qdrant clients are `lru_cache` singletons (`app/services/clients.py`). The
-SQLAlchemy engine is created lazily on first use (`app/db/engine.py`).
-`setup_logging()` runs when `app.main` is imported. The lifespan points the Agents
-SDK at the app's own `AsyncOpenAI` client through `set_default_openai_client` and
-creates one `TurnRunner`, passing it the settings and the session factory.
+**Dependencies.** Code gets settings and clients passed in; no module reads
+settings at import time. Routes get lifespan objects through FastAPI dependencies
+in `app/api/deps.py`, which read `app.state`. Add a new dependency there when a
+route first needs a new shared object.
 
 **Migrations.** The container entrypoint runs `alembic upgrade head` before it
 starts uvicorn. `alembic/env.py` reads the DSN from the app settings, so the
@@ -181,7 +183,7 @@ uv sync
 export DATABASE_URL=postgresql+asyncpg://zoomer:zoomer@localhost:5432/zoomerfume
 export QDRANT_URL=http://localhost:6333
 uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
+uv run uvicorn --factory app.main:create_app --reload
 ```
 
 Lint, format, dependencies and migrations:

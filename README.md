@@ -68,7 +68,7 @@ docker compose up -d postgres qdrant     # the data services still run in Docker
 cd backend
 uv sync
 uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
+uv run uvicorn --factory app.main:create_app --reload
 ```
 
 When the API runs on the host, point it at `localhost` instead of the Compose service names,
@@ -112,7 +112,7 @@ zoomerfume/
 │   │   ├── core/         settings, logging
 │   │   ├── db/           SQLAlchemy engine, models, message log
 │   │   ├── middleware/   request logging context
-│   │   └── services/     shared clients (OpenAI, Qdrant)
+│   │   └── services/     OpenAI and Qdrant clients
 │   ├── alembic/          database migrations
 │   ├── scripts/          container entrypoint
 │   └── pyproject.toml    uv project (Python 3.12)

@@ -1,18 +1,15 @@
-"""Shared singleton clients for OpenAI and Qdrant."""
+"""Constructors for the OpenAI and Qdrant clients owned by the app lifespan."""
 
 from __future__ import annotations
-
-from functools import lru_cache
 
 from openai import AsyncOpenAI
 from qdrant_client import AsyncQdrantClient
 
-from app.core.config import get_settings
+from app.core.config import Settings
 
 
-@lru_cache(maxsize=1)
-def get_openai_client() -> AsyncOpenAI:
-    settings = get_settings()
+def create_openai_client(settings: Settings) -> AsyncOpenAI:
+    """Create the OpenAI client the Agents SDK runs on."""
     return AsyncOpenAI(
         api_key=settings.openai_api_key,
         timeout=60.0,
@@ -20,13 +17,6 @@ def get_openai_client() -> AsyncOpenAI:
     )
 
 
-@lru_cache(maxsize=1)
-def get_qdrant_client() -> AsyncQdrantClient:
-    settings = get_settings()
+def create_qdrant_client(settings: Settings) -> AsyncQdrantClient:
+    """Create the Qdrant client."""
     return AsyncQdrantClient(url=settings.qdrant_url, timeout=10)
-
-
-async def close_clients() -> None:
-    """Close all shared clients. Call during application shutdown."""
-    await get_openai_client().close()
-    await get_qdrant_client().close()
