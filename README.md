@@ -87,6 +87,9 @@ uv run ruff format .
 uv run pytest        # unit tests; no running services or API key needed
 ```
 
+CI (GitHub Actions) runs the same lint, format and test checks on every pull request into `dev` and
+`main`, and builds the Docker image.
+
 ## Configuration
 
 All settings come from environment variables (`.env` for local runs). See `.env.example` for the
@@ -116,7 +119,9 @@ zoomerfume/
 │   │   └── services/     OpenAI and Qdrant clients
 │   ├── alembic/          database migrations
 │   ├── scripts/          container entrypoint
+│   ├── tests/            pytest unit tests
 │   └── pyproject.toml    uv project (Python 3.12)
+├── .github/workflows/ci.yml      CI pipeline
 ├── Dockerfile
 ├── docker-compose.yml            api + postgres + qdrant
 ├── docker-compose.override.yml   dev overrides

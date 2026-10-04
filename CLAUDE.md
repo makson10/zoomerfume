@@ -48,6 +48,7 @@ writes collections yet.
 - `backend/tests/`: pytest unit tests and test fakes
 - `backend/scripts/entrypoint.sh`: container entrypoint
 - `backend/pyproject.toml`, `backend/uv.lock`: the uv project (Python 3.12)
+- `.github/workflows/ci.yml`: the CI workflow
 - Root: `Dockerfile`, `docker-compose.yml`, `docker-compose.override.yml`,
   `.env.example`, `README.md`
 
@@ -143,6 +144,10 @@ They never call OpenAI, Postgres or Qdrant:
 
 Keep tests few and focused: the happy path plus the errors that matter. Replace
 external services with fakes at the boundary instead of starting them.
+
+CI (`.github/workflows/ci.yml`) runs on pull requests and pushes to `dev` and
+`main`. Job `backend` runs `uv sync --frozen`, `ruff check`, `ruff format --check`
+and `pytest` in `backend/`. Job `docker` builds the image.
 
 ## Configuration
 
