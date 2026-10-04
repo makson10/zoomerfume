@@ -45,6 +45,7 @@ writes collections yet.
   - `middleware/`: per-request logging context
   - `services/`: OpenAI and Qdrant client constructors
 - `backend/alembic/`: database migrations (`versions/0001_messages.py`, ...)
+- `backend/tests/`: pytest unit tests and test fakes
 - `backend/scripts/entrypoint.sh`: container entrypoint
 - `backend/pyproject.toml`, `backend/uv.lock`: the uv project (Python 3.12)
 - Root: `Dockerfile`, `docker-compose.yml`, `docker-compose.override.yml`,
@@ -127,6 +128,22 @@ route first needs a new shared object.
 starts uvicorn. `alembic/env.py` reads the DSN from the app settings, so the
 database URL is defined in exactly one place.
 
+## Tests
+
+Unit tests live in `backend/tests/` and run with pytest (`asyncio_mode = "auto"`).
+They never call OpenAI, Postgres or Qdrant:
+
+- `conftest.py` builds `Settings` in code with `_env_file=None`, so a real key in
+  `.env` is never read.
+- The `client` fixture overrides `get_turn_runner` with `FakeTurnRunner`
+  (`tests/fakes.py`) and uses `TestClient` without `with`, so the lifespan never
+  runs.
+- Runtime tests replace `Runner.run` and run in a temporary directory, so no
+  SQLite file is created in `backend/`.
+
+Keep tests few and focused: the happy path plus the errors that matter. Replace
+external services with fakes at the boundary instead of starting them.
+
 ## Configuration
 
 The app reads environment variables only, through `app/core/config.py`. For local
@@ -186,11 +203,12 @@ uv run alembic upgrade head
 uv run uvicorn --factory app.main:create_app --reload
 ```
 
-Lint, format, dependencies and migrations:
+Lint, format, tests, dependencies and migrations:
 
 ```bash
 uv run ruff check .
 uv run ruff format .
+uv run pytest
 uv add <package>                   # updates pyproject.toml and uv.lock
 uv add --dev <package>
 uv run alembic revision -m "<description>" --rev-id 0002   # then hand-write the body
@@ -208,8 +226,8 @@ and any missing dependency or config that prevents startup: Docker not running, 
 
 ## Notes
 
-- Verify changes with `uv run ruff check .`, `uv run ruff format --check .` and the
-  smoke checks above.
+- Verify changes with `uv run ruff check .`, `uv run ruff format --check .`,
+  `uv run pytest` and the smoke checks above.
 - Agent history lives in the container filesystem (`/app/data/agents/sessions.db`),
   not on a volume. Recreating the `api` container (a rebuild, `docker compose down`)
   starts every conversation fresh; the `messages` table in Postgres keeps the log.

@@ -79,11 +79,12 @@ export DATABASE_URL=postgresql+asyncpg://zoomer:zoomer@localhost:5432/zoomerfume
 export QDRANT_URL=http://localhost:6333
 ```
 
-Lint and format:
+Lint, format and tests:
 
 ```bash
 uv run ruff check .
 uv run ruff format .
+uv run pytest        # unit tests; no running services or API key needed
 ```
 
 ## Configuration
