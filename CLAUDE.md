@@ -24,9 +24,9 @@ files, `.env.example` and docs live at the root.
 ```
 client ── POST /api/chat ──► api (FastAPI, app/api/chat.py)
                                │
-                               ├── run_turn() ──► OpenAI Responses API (CHAT_MODEL)
-                               ├── history ─────► SQLite    data/agents/sessions.db
-                               └── message log ─► Postgres  messages table (fail-open)
+                               ├── TurnRunner.run() ──► OpenAI Responses API (CHAT_MODEL)
+                               ├── history ───────────► SQLite    data/agents/sessions.db
+                               └── message log ───────► Postgres  messages table (fail-open)
 
 app startup:        ping Postgres + Qdrant (a failure is logged, never fatal)
 container startup:  alembic upgrade head, then uvicorn
@@ -38,7 +38,7 @@ writes collections yet.
 ## Repository Layout
 
 - `backend/app/`: the FastAPI application
-  - `api/`: HTTP routes (`health.py`, `chat.py`)
+  - `api/`: HTTP routes (`health.py`, `chat.py`) and route dependencies (`deps.py`)
   - `agent/`: Zoomer's runtime, system prompt and per-turn context
   - `core/`: settings, logging setup
   - `db/`: SQLAlchemy engine, models, fail-open write guard, message log
@@ -83,8 +83,9 @@ A chat turn goes through these steps:
 
 1. `POST /api/chat` (`app/api/chat.py`) validates `{session_id, message}`. Both
    fields are stripped; `message` is 1–4000 characters.
-2. `run_turn()` (`app/agent/runtime.py`) builds a `TurnContext` and calls
-   `Runner.run` with the singleton `Agent` (`get_agent()`).
+2. The route gets the `TurnRunner` (`app/agent/runtime.py`) through the
+   `get_turn_runner` dependency (`app/api/deps.py`). `TurnRunner.run()` builds a
+   `TurnContext` and calls `Runner.run` with the runner's `Agent`.
 3. The agent's instructions are the static `AGENT_INSTRUCTIONS`
    (`app/agent/prompts.py`) plus the current date and time in UTC, recomputed on
    every run.
@@ -92,7 +93,7 @@ A chat turn goes through these steps:
    (relative to the working directory). The model input is capped two ways, and
    neither deletes stored rows:
    - by age: `HISTORY_RETENTION_DAYS`, in `get_items()`
-   - by count: the last `HISTORY_WINDOW_TURNS` user turns, in `_window_history()`
+   - by count: the last `HISTORY_WINDOW_TURNS` user turns, in `window_history()`
    
    Both cut only on turn boundaries, so a tool call is never separated from its
    output.
@@ -100,24 +101,25 @@ A chat turn goes through these steps:
    capped at `AGENT_MAX_TURNS` agent-loop iterations.
 6. Any runtime error, or an empty answer, becomes `FALLBACK_TEXT`, and the turn is
    marked `degraded`. The endpoint still answers 200.
-7. `record_turn_messages()` writes the user row and the assistant row to the
-   `messages` table through `pg_guard`.
+7. When `MESSAGE_LOG_ENABLED=true`, `record_turn_messages()` writes the user row
+   and the assistant row to the `messages` table through `pg_guard`.
 
-**Message log writes are fail-open.** `pg_guard` (`app/db/guard.py`) skips the
-write when `MESSAGE_LOG_ENABLED=false`, bounds it to 5 seconds, and logs and
-swallows any error. A database problem must never break a chat turn.
+**Message log writes are fail-open.** `pg_guard` (`app/db/guard.py`) bounds the
+write to 5 seconds, and logs and swallows any error. A database problem must never
+break a chat turn.
 
 **Startup and shutdown.** Startup (`lifespan` in `app/main.py`) pings Postgres and
 Qdrant; if either is down, it logs the error and keeps starting. Shutdown closes the shared
 clients and disposes the engine. `GET /health` is a liveness check that always
 returns `{"status": "ok"}`.
 
-**Singletons.** `get_settings()` is `lru_cache`d, and modules read it at import
-time (`settings = get_settings()`). The OpenAI and Qdrant clients are `lru_cache`
-singletons (`app/services/clients.py`). The SQLAlchemy engine is created lazily on
-first use (`app/db/engine.py`). `setup_logging()` runs when `app.main` is
-imported. The Agents SDK is pointed at the app's own `AsyncOpenAI` client through
-`set_default_openai_client`.
+**Singletons.** `get_settings()` is `lru_cache`d, and `app/main.py` and
+`app/db/engine.py` read it at import time (`settings = get_settings()`). The OpenAI
+and Qdrant clients are `lru_cache` singletons (`app/services/clients.py`). The
+SQLAlchemy engine is created lazily on first use (`app/db/engine.py`).
+`setup_logging()` runs when `app.main` is imported. The lifespan points the Agents
+SDK at the app's own `AsyncOpenAI` client through `set_default_openai_client` and
+creates one `TurnRunner`, passing it the settings and the session factory.
 
 **Migrations.** The container entrypoint runs `alembic upgrade head` before it
 starts uvicorn. `alembic/env.py` reads the DSN from the app settings, so the

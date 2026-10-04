@@ -12,15 +12,17 @@ import logging
 from collections.abc import AsyncGenerator, Awaitable
 from contextlib import asynccontextmanager
 
+from agents import set_default_openai_client
 from fastapi import FastAPI
 
+from app.agent.runtime import TurnRunner
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
-from app.db.engine import close_engine, ping_db
+from app.db.engine import close_engine, get_sessionmaker, ping_db
 from app.middleware.request_context import FastAPILoggingMiddleware
-from app.services.clients import close_clients, get_qdrant_client
+from app.services.clients import close_clients, get_openai_client, get_qdrant_client
 
 settings = get_settings()
 setup_logging(debug=settings.debug)
@@ -45,6 +47,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # ── STARTUP ───────────────────────────────────────────────────────────────
     logger.info("Starting Zoomerfume API…")
+
+    set_default_openai_client(get_openai_client())
+    app.state.turn_runner = TurnRunner(settings, await get_sessionmaker())
 
     # 1. Verify Postgres connectivity (message log). Fail-open: the message log
     #    is a side-write, so an unreachable DB only loses logging, never the chat.

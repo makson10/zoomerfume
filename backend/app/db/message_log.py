@@ -8,16 +8,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app.db.engine import get_sessionmaker
 from app.db.guard import pg_guard
 from app.db.models import Message
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
     from app.agent.context import TurnContext
 
 
 @pg_guard
-async def record_turn_messages(ctx: TurnContext, reply: str) -> None:
+async def record_turn_messages(
+    sessionmaker: async_sessionmaker[AsyncSession], ctx: TurnContext, reply: str
+) -> None:
     """Persist the user message + Zoomer's reply for a turn."""
     rows = [
         Message(
@@ -34,7 +37,6 @@ async def record_turn_messages(ctx: TurnContext, reply: str) -> None:
             meta={"degraded": ctx.degraded},
         ),
     ]
-    sessionmaker = await get_sessionmaker()
     async with sessionmaker() as session:
         session.add_all(rows)
         await session.commit()
