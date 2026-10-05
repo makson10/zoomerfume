@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from agents import Runner
@@ -47,20 +48,26 @@ def test_window_history_keeps_everything(turns: int) -> None:
     assert window_history(history, new_items, turns=turns) == history + new_items
 
 
-async def _run_raises(*args: Any, **kwargs: Any) -> Any:
-    raise RuntimeError("model is down")
-
-
-async def _run_returns_blank(*args: Any, **kwargs: Any) -> Any:
-    return SimpleNamespace(final_output="   ")
-
-
-@pytest.mark.parametrize("fake_run", [_run_raises, _run_returns_blank], ids=["error", "blank"])
-async def test_turn_runner_falls_back_when_the_agent_fails(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_run: Any
+@pytest.mark.parametrize(
+    ("outcome", "expected"),
+    [
+        (SimpleNamespace(final_output=" try a vanilla musk "), "try a vanilla musk"),
+        (SimpleNamespace(final_output="   "), FALLBACK_TEXT),
+        (RuntimeError("model is down"), FALLBACK_TEXT),
+    ],
+    ids=["reply", "blank", "error"],
+)
+async def test_turn_runner_returns_the_reply_or_the_fallback(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    outcome: Any,
+    expected: str,
 ) -> None:
     monkeypatch.chdir(tmp_path)
+    fake_run = AsyncMock(side_effect=[outcome])
     monkeypatch.setattr(Runner, "run", fake_run)
     runner = TurnRunner(settings, async_sessionmaker())
 
-    assert await runner.run("demo", "hi") == FALLBACK_TEXT
+    assert await runner.run("demo", "hi") == expected
+    fake_run.assert_awaited_once()
