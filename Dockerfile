@@ -44,6 +44,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 # The entrypoint runs `alembic upgrade head`, then execs the command below
 # (CMD here in prod; the docker-compose dev override swaps in --reload).
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["python", "-m", "uvicorn", "app.main:app", \
+CMD ["python", "-m", "uvicorn", "--factory", "app.main:create_app", \
      "--host", "0.0.0.0", "--port", "8000", \
      "--loop", "uvloop", "--no-access-log"]

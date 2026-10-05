@@ -24,9 +24,9 @@ files, `.env.example` and docs live at the root.
 ```
 client ── POST /api/chat ──► api (FastAPI, app/api/chat.py)
                                │
-                               ├── run_turn() ──► OpenAI Responses API (CHAT_MODEL)
-                               ├── history ─────► SQLite    data/agents/sessions.db
-                               └── message log ─► Postgres  messages table (fail-open)
+                               ├── TurnRunner.run() ──► OpenAI Responses API (CHAT_MODEL)
+                               ├── history ───────────► SQLite    data/agents/sessions.db
+                               └── message log ───────► Postgres  messages table (fail-open)
 
 app startup:        ping Postgres + Qdrant (a failure is logged, never fatal)
 container startup:  alembic upgrade head, then uvicorn
@@ -38,22 +38,25 @@ writes collections yet.
 ## Repository Layout
 
 - `backend/app/`: the FastAPI application
-  - `api/`: HTTP routes (`health.py`, `chat.py`)
+  - `api/`: HTTP routes (`health.py`, `chat.py`) and route dependencies (`deps.py`)
   - `agent/`: Zoomer's runtime, system prompt and per-turn context
   - `core/`: settings, logging setup
   - `db/`: SQLAlchemy engine, models, fail-open write guard, message log
   - `middleware/`: per-request logging context
-  - `services/`: shared OpenAI and Qdrant clients
+  - `services/`: OpenAI and Qdrant client constructors
 - `backend/alembic/`: database migrations (`versions/0001_messages.py`, ...)
+- `backend/tests/`: pytest unit tests and test fakes
 - `backend/scripts/entrypoint.sh`: container entrypoint
 - `backend/pyproject.toml`, `backend/uv.lock`: the uv project (Python 3.12)
+- `.github/workflows/ci.yml`: the CI workflow
 - Root: `Dockerfile`, `docker-compose.yml`, `docker-compose.override.yml`,
   `.env.example`, `README.md`
 
 ## Entry Points
 
-- ASGI app: `app.main:app`. The image runs it with uvicorn
-  (`--loop uvloop --no-access-log`); the dev override swaps in `--reload`.
+- ASGI app: the `app.main:create_app` factory. The image runs it with
+  `uvicorn --factory` (`--loop uvloop --no-access-log`); the dev override swaps in
+  `--reload`.
 - Container start: `backend/scripts/entrypoint.sh` runs `alembic upgrade head`,
   then `exec`s the command. A failed migration stops the container.
 - HTTP API:
@@ -83,8 +86,9 @@ A chat turn goes through these steps:
 
 1. `POST /api/chat` (`app/api/chat.py`) validates `{session_id, message}`. Both
    fields are stripped; `message` is 1–4000 characters.
-2. `run_turn()` (`app/agent/runtime.py`) builds a `TurnContext` and calls
-   `Runner.run` with the singleton `Agent` (`get_agent()`).
+2. The route gets the `TurnRunner` (`app/agent/runtime.py`) through the
+   `get_turn_runner` dependency (`app/api/deps.py`). `TurnRunner.run()` builds a
+   `TurnContext` and calls `Runner.run` with the runner's `Agent`.
 3. The agent's instructions are the static `AGENT_INSTRUCTIONS`
    (`app/agent/prompts.py`) plus the current date and time in UTC, recomputed on
    every run.
@@ -92,7 +96,7 @@ A chat turn goes through these steps:
    (relative to the working directory). The model input is capped two ways, and
    neither deletes stored rows:
    - by age: `HISTORY_RETENTION_DAYS`, in `get_items()`
-   - by count: the last `HISTORY_WINDOW_TURNS` user turns, in `_window_history()`
+   - by count: the last `HISTORY_WINDOW_TURNS` user turns, in `window_history()`
    
    Both cut only on turn boundaries, so a tool call is never separated from its
    output.
@@ -100,28 +104,50 @@ A chat turn goes through these steps:
    capped at `AGENT_MAX_TURNS` agent-loop iterations.
 6. Any runtime error, or an empty answer, becomes `FALLBACK_TEXT`, and the turn is
    marked `degraded`. The endpoint still answers 200.
-7. `record_turn_messages()` writes the user row and the assistant row to the
-   `messages` table through `pg_guard`.
+7. When `MESSAGE_LOG_ENABLED=true`, `record_turn_messages()` writes the user row
+   and the assistant row to the `messages` table through `pg_guard`.
 
-**Message log writes are fail-open.** `pg_guard` (`app/db/guard.py`) skips the
-write when `MESSAGE_LOG_ENABLED=false`, bounds it to 5 seconds, and logs and
-swallows any error. A database problem must never break a chat turn.
+**Message log writes are fail-open.** `pg_guard` (`app/db/guard.py`) bounds the
+write to 5 seconds, and logs and swallows any error. A database problem must never
+break a chat turn.
 
-**Startup and shutdown.** Startup (`lifespan` in `app/main.py`) pings Postgres and
-Qdrant; if either is down, it logs the error and keeps starting. Shutdown closes the shared
-clients and disposes the engine. `GET /health` is a liveness check that always
-returns `{"status": "ok"}`.
+**Startup and shutdown.** `create_app(settings=None)` (`app/main.py`) loads the
+settings (or takes the ones passed in), sets up logging and stores the settings on
+`app.state`. Nothing runs at import time. The lifespan creates the OpenAI and
+Qdrant clients and the SQLAlchemy engine, points the Agents SDK at the app's own
+`AsyncOpenAI` client through `set_default_openai_client`, and stores one
+`TurnRunner` on `app.state`. It then pings Postgres and Qdrant; if either is down,
+it logs the error and keeps starting. Shutdown closes the clients and disposes the
+engine. `GET /health` is a liveness check that always returns `{"status": "ok"}`.
 
-**Singletons.** `get_settings()` is `lru_cache`d, and modules read it at import
-time (`settings = get_settings()`). The OpenAI and Qdrant clients are `lru_cache`
-singletons (`app/services/clients.py`). The SQLAlchemy engine is created lazily on
-first use (`app/db/engine.py`). `setup_logging()` runs when `app.main` is
-imported. The Agents SDK is pointed at the app's own `AsyncOpenAI` client through
-`set_default_openai_client`.
+**Dependencies.** Code gets settings and clients passed in; no module reads
+settings at import time. Routes get lifespan objects through FastAPI dependencies
+in `app/api/deps.py`, which read `app.state`. Add a new dependency there when a
+route first needs a new shared object.
 
 **Migrations.** The container entrypoint runs `alembic upgrade head` before it
 starts uvicorn. `alembic/env.py` reads the DSN from the app settings, so the
 database URL is defined in exactly one place.
+
+## Tests
+
+Unit tests live in `backend/tests/` and run with pytest (`asyncio_mode = "auto"`).
+They never call OpenAI, Postgres or Qdrant:
+
+- `conftest.py` builds `Settings` in code with `_env_file=None`, so a real key in
+  `.env` is never read.
+- The `client` fixture overrides `get_turn_runner` with `FakeTurnRunner`
+  (`tests/fakes.py`) and uses `TestClient` without `with`, so the lifespan never
+  runs.
+- Runtime tests replace `Runner.run` and run in a temporary directory, so no
+  SQLite file is created in `backend/`.
+
+Keep tests few and focused: the happy path plus the errors that matter. Replace
+external services with fakes at the boundary instead of starting them.
+
+CI (`.github/workflows/ci.yml`) runs on pull requests and pushes to `dev` and
+`main`. Job `backend` runs `uv sync --frozen`, `ruff check`, `ruff format --check`
+and `pytest` in `backend/`. Job `docker` builds the image.
 
 ## Configuration
 
@@ -179,14 +205,15 @@ uv sync
 export DATABASE_URL=postgresql+asyncpg://zoomer:zoomer@localhost:5432/zoomerfume
 export QDRANT_URL=http://localhost:6333
 uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
+uv run uvicorn --factory app.main:create_app --reload
 ```
 
-Lint, format, dependencies and migrations:
+Lint, format, tests, dependencies and migrations:
 
 ```bash
 uv run ruff check .
 uv run ruff format .
+uv run pytest
 uv add <package>                   # updates pyproject.toml and uv.lock
 uv add --dev <package>
 uv run alembic revision -m "<description>" --rev-id 0002   # then hand-write the body
@@ -204,8 +231,11 @@ and any missing dependency or config that prevents startup: Docker not running, 
 
 ## Notes
 
-- Verify changes with `uv run ruff check .`, `uv run ruff format --check .` and the
-  smoke checks above.
+- Verify changes with `uv run ruff check .`, `uv run ruff format --check .`,
+  `uv run pytest` and the smoke checks above.
+- In `README.md`, write each paragraph, list item and blockquote as one line. Don't
+  hard-wrap prose at a fixed width; editors and GitHub wrap it. Code blocks, tables
+  and the ASCII diagrams keep their own line breaks.
 - Agent history lives in the container filesystem (`/app/data/agents/sessions.db`),
   not on a volume. Recreating the `api` container (a rebuild, `docker compose down`)
   starts every conversation fresh; the `messages` table in Postgres keeps the log.

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agent.runtime import run_turn
+from app.agent.runtime import TurnRunner
+from app.api.deps import get_turn_runner
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -22,6 +25,9 @@ class ChatResponse(BaseModel):
 
 
 @router.post("/chat")
-async def chat(body: ChatRequest) -> ChatResponse:
-    reply = await run_turn(body.session_id, body.message)
+async def chat(
+    body: ChatRequest, runner: Annotated[TurnRunner, Depends(get_turn_runner)]
+) -> ChatResponse:
+    """Return Zoomer's reply to one user message."""
+    reply = await runner.run(body.session_id, body.message)
     return ChatResponse(reply=reply)
