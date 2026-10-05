@@ -1,19 +1,12 @@
 # Zoomerfume
 
-**Zoomer** is the AI shop assistant of **Zoomerfume**, a fictional Ukrainian online perfume shop.
-It recommends perfumes by taste, budget, occasion and season, compares products, answers shop
-questions (delivery, returns, payment, loyalty) and gives general perfume advice. The goal is a
-*grounded* assistant: answers about the shop come from a knowledge base the model searches through
-tools, with citations to the records it used, not from the model's memory.
+**Zoomer** is the AI shop assistant of **Zoomerfume**, a fictional Ukrainian online perfume shop. It recommends perfumes by taste, budget, occasion and season, compares products, answers shop questions (delivery, returns, payment, loyalty) and gives general perfume advice. The goal is a *grounded* assistant: answers about the shop come from a knowledge base the model searches through tools, with citations to the records it used, not from the model's memory.
 
-> **Status: early skeleton.** The current version is a non-streaming chat API with Zoomer and no
-> tools yet. Zoomer can talk about perfume in general, but it can't look up Zoomerfume's catalog,
-> prices or policies, and it says so.
+> **Status: early skeleton.** The current version is a non-streaming chat API with Zoomer and no tools yet. Zoomer can talk about perfume in general, but it can't look up Zoomerfume's catalog, prices or policies, and it says so.
 
 ## Stack
 
-- **Backend:** Python 3.12, FastAPI, [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/),
-  pydantic-settings, structlog, uv
+- **Backend:** Python 3.12, FastAPI, [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/), pydantic-settings, structlog, uv
 - **Models:** `gpt-6-luna` for chat (configurable); `text-embedding-3-small` for the knowledge base (planned)
 - **Data:** Postgres (async SQLAlchemy + Alembic), Qdrant (vector search)
 - **Runtime:** Docker Compose; Kubernetes (kind) planned
@@ -43,8 +36,7 @@ cp .env.example .env          # then set OPENAI_API_KEY in .env
 docker compose up --build
 ```
 
-`docker compose up` also loads `docker-compose.override.yml` (auto-reload, host ports for Postgres
-and Qdrant). Add `--watch` to sync code changes into the running container.
+`docker compose up` also loads `docker-compose.override.yml` (auto-reload, host ports for Postgres and Qdrant). Add `--watch` to sync code changes into the running container.
 
 Talk to Zoomer:
 
@@ -55,8 +47,7 @@ curl -X POST localhost:8000/api/chat \
 # → {"reply": "..."}
 ```
 
-Send another message with the same `session_id` to continue the conversation.
-Health check: `curl localhost:8000/health`.
+Send another message with the same `session_id` to continue the conversation. Health check: `curl localhost:8000/health`.
 
 ## Local development (without Docker for the API)
 
@@ -71,8 +62,7 @@ uv run alembic upgrade head
 uv run uvicorn --factory app.main:create_app --reload
 ```
 
-When the API runs on the host, point it at `localhost` instead of the Compose service names,
-e.g. by exporting these (environment variables take precedence over `.env`):
+When the API runs on the host, point it at `localhost` instead of the Compose service names, e.g. by exporting these (environment variables take precedence over `.env`):
 
 ```bash
 export DATABASE_URL=postgresql+asyncpg://zoomer:zoomer@localhost:5432/zoomerfume
@@ -87,13 +77,11 @@ uv run ruff format .
 uv run pytest        # unit tests; no running services or API key needed
 ```
 
-CI (GitHub Actions) runs the same lint, format and test checks on every pull request into `dev` and
-`main`, and builds the Docker image.
+CI (GitHub Actions) runs the same lint, format and test checks on every pull request into `dev` and `main`, and builds the Docker image.
 
 ## Configuration
 
-All settings come from environment variables (`.env` for local runs). See `.env.example` for the
-full list. The main ones:
+All settings come from environment variables (`.env` for local runs). See `.env.example` for the full list. The main ones:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -130,6 +118,4 @@ zoomerfume/
 
 ## Disclaimer
 
-Zoomerfume is a **fictional shop** made for this project. Perfume names refer to real products, but
-all shop data (prices, stock, policies, contacts) is invented. The project is not affiliated with any
-brand or retailer. Zoomer is an AI assistant and can make mistakes.
+Zoomerfume is a **fictional shop** made for this project. Perfume names refer to real products, but all shop data (prices, stock, policies, contacts) is invented. The project is not affiliated with any brand or retailer. Zoomer is an AI assistant and can make mistakes.

@@ -233,6 +233,9 @@ and any missing dependency or config that prevents startup: Docker not running, 
 
 - Verify changes with `uv run ruff check .`, `uv run ruff format --check .`,
   `uv run pytest` and the smoke checks above.
+- In `README.md`, write each paragraph, list item and blockquote as one line. Don't
+  hard-wrap prose at a fixed width; editors and GitHub wrap it. Code blocks, tables
+  and the ASCII diagrams keep their own line breaks.
 - Agent history lives in the container filesystem (`/app/data/agents/sessions.db`),
   not on a volume. Recreating the `api` container (a rebuild, `docker compose down`)
   starts every conversation fresh; the `messages` table in Postgres keeps the log.
