@@ -1,4 +1,13 @@
-# ── Stage 1: install dependencies into a virtual environment ─────────────
+# ── Stage 1: build the web chat ─────────────────────────────────────────
+FROM node:22-alpine AS frontend
+
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ── Stage 2: install dependencies into a virtual environment ─────────────
 FROM python:3.12-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.19 /uv /bin/uv
@@ -14,7 +23,7 @@ WORKDIR /build
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# ── Stage 2: lean runtime image ─────────────────────────────────────────
+# ── Stage 3: lean runtime image ─────────────────────────────────────────
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -31,6 +40,9 @@ COPY backend/alembic/ ./alembic/
 COPY backend/alembic.ini ./alembic.ini
 COPY backend/scripts/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
+
+# The built web chat, served by FastAPI at /.
+COPY --from=frontend /frontend/dist/ ./static/
 
 RUN chown -R appuser:appgroup /app
 USER appuser

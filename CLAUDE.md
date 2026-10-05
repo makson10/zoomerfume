@@ -1,28 +1,20 @@
 # CLAUDE.md
 
-This file gives Claude Code the project context and operating rules for the
-Zoomerfume repository. Read it before planning, editing, or testing code.
+This file gives Claude Code the project context and operating rules for the Zoomerfume repository. Read it before planning, editing, or testing code.
 
 ## Project Context
 
-Zoomerfume is a fictional Ukrainian online perfume shop (prices in UAH). This
-repository is its AI shop assistant, **Zoomer**: a chat bot that recommends
-perfumes, compares products, answers shop questions and gives general perfume
-advice. The goal is a *grounded* assistant: answers about the shop must come from a
-knowledge base the model searches through tools, with citations, never from the
-model's memory.
+Zoomerfume is a fictional Ukrainian online perfume shop (prices in UAH). This repository is its AI shop assistant, **Zoomer**: a chat bot that recommends perfumes, compares products, answers shop questions and gives general perfume advice. The goal is a *grounded* assistant: answers about the shop must come from a knowledge base the model searches through tools, with citations, never from the model's memory.
 
-Current state: a non-streaming chat API with Zoomer and no tools yet. Zoomer can
-talk about perfume in general but can't look up the shop's catalog, prices or
-policies, and says so.
+Current state: a web chat with Zoomer on top of a non-streaming chat API, with no tools yet. Zoomer can talk about perfume in general but can't look up the shop's catalog, prices or policies, and says so.
 
-The repository root is a single git repo. Backend code lives in `backend/`; Docker
-files, `.env.example` and docs live at the root.
+The repository root is a single git repo. Backend code lives in `backend/` and the web chat in `frontend/`; Docker files, `.env.example` and docs live at the root.
 
 ## Request Flow
 
 ```
-client ── POST /api/chat ──► api (FastAPI, app/api/chat.py)
+browser ── GET / ──────────► api: static files from /app/static (the built frontend)
+browser ── POST /api/chat ─► api (FastAPI, app/api/chat.py)
                                │
                                ├── TurnRunner.run() ──► OpenAI Responses API (CHAT_MODEL)
                                ├── history ───────────► SQLite    data/agents/sessions.db
@@ -32,13 +24,12 @@ app startup:        ping Postgres + Qdrant (a failure is logged, never fatal)
 container startup:  alembic upgrade head, then uvicorn
 ```
 
-Qdrant is wired in (client, startup ping, Compose service) but nothing reads or
-writes collections yet.
+Qdrant is wired in (client, startup ping, Compose service) but nothing reads or writes collections yet.
 
 ## Repository Layout
 
 - `backend/app/`: the FastAPI application
-  - `api/`: HTTP routes (`health.py`, `chat.py`) and route dependencies (`deps.py`)
+  - `api/`: HTTP routes (`health.py`, `chat.py`), route dependencies (`deps.py`) and the web chat mount (`spa.py`)
   - `agent/`: Zoomer's runtime, system prompt and per-turn context
   - `core/`: settings, logging setup
   - `db/`: SQLAlchemy engine, models, fail-open write guard, message log
@@ -48,131 +39,93 @@ writes collections yet.
 - `backend/tests/`: pytest unit tests and test fakes
 - `backend/scripts/entrypoint.sh`: container entrypoint
 - `backend/pyproject.toml`, `backend/uv.lock`: the uv project (Python 3.12)
+- `frontend/`: the web chat (Vite + React + TypeScript + Mantine)
+  - `src/App.tsx`: the page layout
+  - `src/components/`: `Header`, `MessageList`, `MessageBubble`, `Composer`
+  - `src/hooks/useChat.ts`: chat state and the `POST /api/chat` call
+  - `src/theme.ts`: the Mantine theme
+  - `public/logo.svg`: the logo, also used as the favicon
 - `.github/workflows/ci.yml`: the CI workflow
-- Root: `Dockerfile`, `docker-compose.yml`, `docker-compose.override.yml`,
-  `.env.example`, `README.md`
+- Root: `Dockerfile`, `docker-compose.yml`, `docker-compose.override.yml`, `.env.example`, `README.md`
 
 ## Entry Points
 
-- ASGI app: the `app.main:create_app` factory. The image runs it with
-  `uvicorn --factory` (`--loop uvloop --no-access-log`); the dev override swaps in
-  `--reload`.
-- Container start: `backend/scripts/entrypoint.sh` runs `alembic upgrade head`,
-  then `exec`s the command. A failed migration stops the container.
+- ASGI app: the `app.main:create_app` factory. The image runs it with `uvicorn --factory` (`--loop uvloop --no-access-log`); the dev override swaps in `--reload`.
+- Container start: `backend/scripts/entrypoint.sh` runs `alembic upgrade head`, then `exec`s the command. A failed migration stops the container.
 - HTTP API:
   - `GET /health` → `{"status": "ok"}` (liveness only)
   - `POST /api/chat` `{session_id, message}` → `{reply}`; 422 on invalid input
+  - `GET /openapi.json` is served in every mode, so API types can be generated from it
   - `/docs` and `/redoc` only when `DEBUG=true`
+- Web chat: `GET /` and the files next to it (`/assets/*`, `/logo.svg`), when the image has a frontend build. Any other path gets FastAPI's JSON 404.
 
 ## Current Stack
 
-- Runtime: Python 3.12, managed with uv. The Docker image installs from
-  `uv.lock` with `uv sync --frozen`.
+- Runtime: Python 3.12, managed with uv. The Docker image installs from `uv.lock` with `uv sync --frozen`.
 - Web: FastAPI + uvicorn, pydantic v2, pydantic-settings.
-- LLM: OpenAI Agents SDK (`openai-agents`) on the OpenAI Responses API. Chat model
-  `gpt-6-luna`, which rejects `temperature`, so the agent uses low reasoning effort
-  instead.
-- Persistence: Postgres 17 through async SQLAlchemy 2 + asyncpg. Alembic
-  migrations are hand-written. Agent conversation history lives in a SQLite file.
+- LLM: OpenAI Agents SDK (`openai-agents`) on the OpenAI Responses API. Chat model `gpt-6-luna`, which rejects `temperature`, so the agent uses low reasoning effort instead.
+- Persistence: Postgres 17 through async SQLAlchemy 2 + asyncpg. Alembic migrations are hand-written. Agent conversation history lives in a SQLite file.
 - Vector store: Qdrant (server and `qdrant-client`, both v1.19).
-- Logging: structlog on top of stdlib `logging`. JSON lines by default, colored
-  console output when `DEBUG=true`.
-- Lint/format: ruff (line length 100, rules `E`, `F`, `I`, `UP`).
+- Logging: structlog on top of stdlib `logging`. JSON lines by default, colored console output when `DEBUG=true`.
+- Frontend: npm (CI and the Docker image use Node.js 22), Vite 8, React 19, TypeScript 6.0, Mantine 9, `react-markdown` with `remark-gfm`, Tabler icons.
+- Lint/format: ruff for the backend (line length 100, rules `E`, `F`, `I`, `UP`); oxlint and Prettier for the frontend (no semicolons, single quotes).
 - Runtime environment: Docker Compose with `api`, `postgres` and `qdrant`.
 
 ## Architecture Notes
 
 A chat turn goes through these steps:
 
-1. `POST /api/chat` (`app/api/chat.py`) validates `{session_id, message}`. Both
-   fields are stripped; `message` is 1–4000 characters.
-2. The route gets the `TurnRunner` (`app/agent/runtime.py`) through the
-   `get_turn_runner` dependency (`app/api/deps.py`). `TurnRunner.run()` builds a
-   `TurnContext` and calls `Runner.run` with the runner's `Agent`.
-3. The agent's instructions are the static `AGENT_INSTRUCTIONS`
-   (`app/agent/prompts.py`) plus the current date and time in UTC, recomputed on
-   every run.
-4. History comes from `RetentionSQLiteSession` at `data/agents/sessions.db`
-   (relative to the working directory). The model input is capped two ways, and
-   neither deletes stored rows:
+1. `POST /api/chat` (`app/api/chat.py`) validates `{session_id, message}`. Both fields are stripped; `message` is 1–4000 characters.
+2. The route gets the `TurnRunner` (`app/agent/runtime.py`) through the `get_turn_runner` dependency (`app/api/deps.py`). `TurnRunner.run()` builds a `TurnContext` and calls `Runner.run` with the runner's `Agent`.
+3. The agent's instructions are the static `AGENT_INSTRUCTIONS` (`app/agent/prompts.py`) plus the current date and time in UTC, recomputed on every run.
+4. History comes from `RetentionSQLiteSession` at `data/agents/sessions.db` (relative to the working directory). The model input is capped two ways, and neither deletes stored rows:
    - by age: `HISTORY_RETENTION_DAYS`, in `get_items()`
    - by count: the last `HISTORY_WINDOW_TURNS` user turns, in `window_history()`
-   
-   Both cut only on turn boundaries, so a tool call is never separated from its
-   output.
-5. Every request carries `prompt_cache_key = session:<session_id>`, and the run is
-   capped at `AGENT_MAX_TURNS` agent-loop iterations.
-6. Any runtime error, or an empty answer, becomes `FALLBACK_TEXT`, and the turn is
-   marked `degraded`. The endpoint still answers 200.
-7. When `MESSAGE_LOG_ENABLED=true`, `record_turn_messages()` writes the user row
-   and the assistant row to the `messages` table through `pg_guard`.
 
-**Message log writes are fail-open.** `pg_guard` (`app/db/guard.py`) bounds the
-write to 5 seconds, and logs and swallows any error. A database problem must never
-break a chat turn.
+   Both cut only on turn boundaries, so a tool call is never separated from its output.
+5. Every request carries `prompt_cache_key = session:<session_id>`, and the run is capped at `AGENT_MAX_TURNS` agent-loop iterations.
+6. Any runtime error, or an empty answer, becomes `FALLBACK_TEXT`, and the turn is marked `degraded`. The endpoint still answers 200.
+7. When `MESSAGE_LOG_ENABLED=true`, `record_turn_messages()` writes the user row and the assistant row to the `messages` table through `pg_guard`.
 
-**Startup and shutdown.** `create_app(settings=None)` (`app/main.py`) loads the
-settings (or takes the ones passed in), sets up logging and stores the settings on
-`app.state`. Nothing runs at import time. The lifespan creates the OpenAI and
-Qdrant clients and the SQLAlchemy engine, points the Agents SDK at the app's own
-`AsyncOpenAI` client through `set_default_openai_client`, and stores one
-`TurnRunner` on `app.state`. It then pings Postgres and Qdrant; if either is down,
-it logs the error and keeps starting. Shutdown closes the clients and disposes the
-engine. `GET /health` is a liveness check that always returns `{"status": "ok"}`.
+**Message log writes are fail-open.** `pg_guard` (`app/db/guard.py`) bounds the write to 5 seconds, and logs and swallows any error. A database problem must never break a chat turn.
 
-**Dependencies.** Code gets settings and clients passed in; no module reads
-settings at import time. Routes get lifespan objects through FastAPI dependencies
-in `app/api/deps.py`, which read `app.state`. Add a new dependency there when a
-route first needs a new shared object.
+**Startup and shutdown.** `create_app(settings=None)` (`app/main.py`) loads the settings (or takes the ones passed in), sets up logging and stores the settings on `app.state`. Nothing runs at import time. After the routers it calls `mount_web_chat()` (`app/api/spa.py`), which mounts the frontend build at `/` only if `backend/static/index.html` exists (`/app/static` in the image). Without a build, as in unit tests or a backend run on the host, the app serves the API only. The lifespan creates the OpenAI and Qdrant clients and the SQLAlchemy engine, points the Agents SDK at the app's own `AsyncOpenAI` client through `set_default_openai_client`, and stores one `TurnRunner` on `app.state`. It then pings Postgres and Qdrant; if either is down, it logs the error and keeps starting. Shutdown closes the clients and disposes the engine. `GET /health` is a liveness check that always returns `{"status": "ok"}`.
 
-**Migrations.** The container entrypoint runs `alembic upgrade head` before it
-starts uvicorn. `alembic/env.py` reads the DSN from the app settings, so the
-database URL is defined in exactly one place.
+**Dependencies.** Code gets settings and clients passed in; no module reads settings at import time. Routes get lifespan objects through FastAPI dependencies in `app/api/deps.py`, which read `app.state`. Add a new dependency there when a route first needs a new shared object.
+
+**Migrations.** The container entrypoint runs `alembic upgrade head` before it starts uvicorn. `alembic/env.py` reads the DSN from the app settings, so the database URL is defined in exactly one place.
+
+**Web chat.** A single page with no router and no state library. `useChat` keeps the messages in React state and the session id in `localStorage` (`zoomerfume:session-id`); "New chat" switches to a fresh UUID. Sending is blocked while a reply is pending. Assistant replies render as Markdown (GFM tables included, raw HTML is not rendered); user messages render as plain text. The color scheme follows the system, and the header toggle overrides it. Keep the UI minimal and functional: stock Mantine components and the theme in `theme.ts`. In development the Vite dev server proxies `/api` to `localhost:8000`, so the browser never needs CORS. In the image, the first Docker stage builds the frontend and the runtime stage copies `frontend/dist` to `/app/static`.
 
 ## Tests
 
-Unit tests live in `backend/tests/` and run with pytest (`asyncio_mode = "auto"`).
-They never call OpenAI, Postgres or Qdrant:
+Unit tests live in `backend/tests/` and run with pytest (`asyncio_mode = "auto"`). They never call OpenAI, Postgres or Qdrant:
 
-- `conftest.py` builds `Settings` in code with `_env_file=None`, so a real key in
-  `.env` is never read.
-- The `client` fixture overrides `get_turn_runner` with `FakeTurnRunner`
-  (`tests/fakes.py`) and uses `TestClient` without `with`, so the lifespan never
-  runs.
-- Runtime tests replace `Runner.run` and run in a temporary directory, so no
-  SQLite file is created in `backend/`.
+- `conftest.py` builds `Settings` in code with `_env_file=None`, so a real key in `.env` is never read.
+- The `client` fixture overrides `get_turn_runner` with `FakeTurnRunner` (`tests/fakes.py`) and uses `TestClient` without `with`, so the lifespan never runs.
+- Runtime tests replace `Runner.run` and run in a temporary directory, so no SQLite file is created in `backend/`.
+- Web chat tests mount a tiny fake build from a temporary directory.
 
-Keep tests few and focused: the happy path plus the errors that matter. Replace
-external services with fakes at the boundary instead of starting them.
+Keep tests few and focused: the happy path plus the errors that matter. Replace external services with fakes at the boundary instead of starting them. The frontend has no test suite; it is checked by lint, formatting and the type-checked build.
 
-CI (`.github/workflows/ci.yml`) runs on pull requests and pushes to `dev` and
-`main`. Job `backend` runs `uv sync --frozen`, `ruff check`, `ruff format --check`
-and `pytest` in `backend/`. Job `docker` builds the image.
+CI (`.github/workflows/ci.yml`) runs on pull requests and pushes to `dev` and `main`. Job `backend` runs `uv sync --frozen`, `ruff check`, `ruff format --check` and `pytest` in `backend/`. Job `frontend` runs `npm ci`, `npm run lint`, `npm run format:check` and `npm run build` in `frontend/`. Job `docker` builds the image with Buildx and caches its layers in the GitHub Actions cache.
 
 ## Configuration
 
-The app reads environment variables only, through `app/core/config.py`. For local
-runs, pydantic-settings also reads `../.env` and `./.env`, so one `.env` at the
-repo root works both for Compose and for a run from `backend/`. Real environment
-variables take precedence over `.env` values.
+The app reads environment variables only, through `app/core/config.py`. For local runs, pydantic-settings also reads `../.env` and `./.env`, so one `.env` at the repo root works both for Compose and for a run from `backend/`. Real environment variables take precedence over `.env` values.
 
-- `.env.example` is the committed template. `.env` holds real secrets and is
-  git-ignored.
-- Compose passes the root `.env` into the `api` container (`env_file`). Postgres
-  credentials also have defaults in `docker-compose.yml`.
-- Inside Compose, services reach each other by service name (`postgres`,
-  `qdrant`). A backend run on the host must point `DATABASE_URL` and `QDRANT_URL`
-  at `localhost` (see Common Commands).
-- After editing `.env`, recreate the container with `docker compose up -d api`.
-  `docker compose restart` reuses the old container config and does not re-read
-  `.env`.
+- `.env.example` is the committed template. `.env` holds real secrets and is git-ignored.
+- Compose passes the root `.env` into the `api` container (`env_file`). Postgres credentials also have defaults in `docker-compose.yml`.
+- Inside Compose, services reach each other by service name (`postgres`, `qdrant`). A backend run on the host must point `DATABASE_URL` and `QDRANT_URL` at `localhost` (see Common Commands).
+- After editing `.env`, recreate the container with `docker compose up -d api`. `docker compose restart` reuses the old container config and does not re-read `.env`.
+
+The frontend has no configuration of its own. It calls the API on the same origin.
 
 ## Common Commands
 
-Run Compose commands from the repo root. Run uv, ruff and alembic from `backend/`.
+Run Compose commands from the repo root. Run uv, ruff and alembic from `backend/`, and npm from `frontend/`.
 
-Full stack (the dev override adds `--reload`, file sync and host ports for
-Postgres and Qdrant):
+Full stack (the dev override adds `--reload`, file sync and host ports for Postgres and Qdrant). The web chat is at http://localhost:8000:
 
 ```bash
 cp .env.example .env               # first time only; set OPENAI_API_KEY
@@ -181,9 +134,7 @@ docker compose logs -f api
 docker compose -f docker-compose.yml up -d --build   # without the dev override
 ```
 
-`--watch` syncs only `backend/app/`. Changes to `pyproject.toml` or `uv.lock`
-trigger a rebuild. New migrations need `docker compose up --build`, because the
-entrypoint applies them when the container starts.
+`--watch` syncs only `backend/app/`. Changes to `pyproject.toml` or `uv.lock` trigger a rebuild. Frontend changes need `docker compose up --build`, or use the Vite dev server below. New migrations need `docker compose up --build`, because the entrypoint applies them when the container starts.
 
 Smoke checks:
 
@@ -192,6 +143,7 @@ curl localhost:8000/health
 curl -X POST localhost:8000/api/chat \
   -H 'content-type: application/json' \
   -d '{"session_id": "demo", "message": "hi"}'
+curl -s localhost:8000/ | grep '<title>'    # the built web chat
 docker compose exec postgres psql -U zoomer -d zoomerfume \
   -c 'select role, left(content, 60), created_at from messages order by id desc limit 4'
 ```
@@ -221,26 +173,28 @@ uv run alembic upgrade head
 uv run alembic downgrade -1
 ```
 
-`/docs` (Swagger UI) is available only when `DEBUG=true`.
+Frontend (needs the API on port 8000, from Compose or uvicorn):
 
-If the user asks Claude to run the project, the API or the full stack, Claude
-should start the required processes in its own background terminal when possible.
-Do not stop at listing commands. Report the command, working directory, URL/port,
-and any missing dependency or config that prevents startup: Docker not running, no
-`OPENAI_API_KEY`, a port already in use, and so on.
+```bash
+cd frontend
+npm ci
+npm run dev                        # http://localhost:5173, proxies /api to localhost:8000
+npm run lint                       # oxlint
+npm run format                     # Prettier; format:check only checks
+npm run build                      # tsc -b, then vite build into dist/
+npm install <package>              # updates package.json and package-lock.json
+```
+
+`/docs` (Swagger UI) is available only when `DEBUG=true`. `/openapi.json` is always available.
+
+If the user asks Claude to run the project, the API or the full stack, Claude should start the required processes in its own background terminal when possible. Do not stop at listing commands. Report the command, working directory, URL/port, and any missing dependency or config that prevents startup: Docker not running, no `OPENAI_API_KEY`, a port already in use, and so on.
 
 ## Notes
 
-- Verify changes with `uv run ruff check .`, `uv run ruff format --check .`,
-  `uv run pytest` and the smoke checks above.
-- In `README.md`, write each paragraph, list item and blockquote as one line. Don't
-  hard-wrap prose at a fixed width; editors and GitHub wrap it. Code blocks, tables
-  and the ASCII diagrams keep their own line breaks.
-- Agent history lives in the container filesystem (`/app/data/agents/sessions.db`),
-  not on a volume. Recreating the `api` container (a rebuild, `docker compose down`)
-  starts every conversation fresh; the `messages` table in Postgres keeps the log.
-- Two HTTP client libraries are installed: `openai` 3.x (and so the Agents SDK)
-  uses `httpx2`/`httpcore2`, while `qdrant-client` uses `httpx` 0.28. Their loggers
-  are quieted separately in `app/core/logging.py`. OpenAI failures surface as
-  `openai.*` exceptions, not `httpx` ones.
+- Verify backend changes with `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest` and the smoke checks above. Verify frontend changes with `npm run lint`, `npm run format:check`, `npm run build` and a look at the page.
+- In `README.md` and `CLAUDE.md`, write each paragraph, list item and blockquote as one line. Don't hard-wrap prose at a fixed width; editors and GitHub wrap it. Code blocks, tables and the ASCII diagrams keep their own line breaks.
+- Agent history lives in the container filesystem (`/app/data/agents/sessions.db`), not on a volume. Recreating the `api` container (a rebuild, `docker compose down`) starts every conversation fresh; the `messages` table in Postgres keeps the log.
+- Two HTTP client libraries are installed: `openai` 3.x (and so the Agents SDK) uses `httpx2`/`httpcore2`, while `qdrant-client` uses `httpx` 0.28. Their loggers are quieted separately in `app/core/logging.py`. OpenAI failures surface as `openai.*` exceptions, not `httpx` ones.
+- TypeScript stays on 6.0, the version the Vite template pins.
+- The production build warns that the JS bundle is over 500 kB (Mantine, Markdown and icons). It is a single local page, so there is no code splitting yet.
 - Every chat check calls OpenAI and costs a little. Keep manual checks short.
