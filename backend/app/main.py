@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.agent.runtime import TurnRunner
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
+from app.api.spa import mount_web_chat
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.db.engine import create_db_engine, ping_db
@@ -124,4 +125,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(FastAPILoggingMiddleware)
     app.include_router(health_router)
     app.include_router(chat_router)
+    mount_web_chat(app)
     return app
