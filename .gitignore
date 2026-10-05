@@ -5,6 +5,11 @@ __pycache__/
 .venv/
 venv/
 
+# Node (frontend)
+node_modules/
+dist/
+*.tsbuildinfo
+
 # Tooling caches
 .pytest_cache/
 .coverage
