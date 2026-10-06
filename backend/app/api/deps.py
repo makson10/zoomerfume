@@ -13,6 +13,7 @@ from app.api.errors import ApiError
 from app.core.config import Settings
 from app.db.models import User
 from app.services.auth import UserStore, session_user_id
+from app.services.conversations import ConversationStore
 
 
 def get_turn_runner(request: Request) -> TurnRunner:
@@ -35,6 +36,10 @@ def get_user_store(db: Annotated[AsyncSession, Depends(get_db)]) -> UserStore:
     return UserStore(db)
 
 
+def get_conversation_store(db: Annotated[AsyncSession, Depends(get_db)]) -> ConversationStore:
+    return ConversationStore(db)
+
+
 async def get_current_user(
     request: Request, users: Annotated[UserStore, Depends(get_user_store)]
 ) -> User:
@@ -51,5 +56,6 @@ async def get_current_user(
 
 
 AppSettings = Annotated[Settings, Depends(get_app_settings)]
+Conversations = Annotated[ConversationStore, Depends(get_conversation_store)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
 Users = Annotated[UserStore, Depends(get_user_store)]

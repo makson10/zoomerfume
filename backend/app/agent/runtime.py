@@ -1,7 +1,7 @@
 """OpenAI Agents SDK runtime.
 
 Owns :class:`TurnRunner`, which produces Zoomer's reply for a single user message,
-and the per-session :class:`agents.SQLiteSession` that stores the history.
+and the per-conversation :class:`agents.SQLiteSession` that stores the history.
 """
 
 from __future__ import annotations
@@ -34,7 +34,8 @@ from app.db.message_log import record_turn_messages
 logger = logging.getLogger(__name__)
 
 # ── SQLite session storage ────────────────────────────────────────────────────
-# One file shared across sessions; the session_id keeps conversations isolated.
+# One file shared across conversations; the session id (the conversation id)
+# keeps them isolated.
 # The directory is created lazily on first use. The model input is bounded two
 # ways: by *age* (RetentionSQLiteSession.get_items below drops turns older than
 # `history_retention_days`) and by *count* (`window_history` keeps the last
@@ -49,14 +50,17 @@ FALLBACK_TEXT = "Oops, something went wrong on my side. Please try again in a mi
 
 
 def _agent_instructions(wrapper: RunContextWrapper[TurnContext], agent: Agent) -> str:
-    """Per-run system instructions: static base + the current date and time.
+    """Per-run system instructions: static base + the date and time + the customer's name.
 
     Instructions are recomputed each run and never persisted to the session, so
     the date is always fresh. Appended at the end so the static prefix stays
     cacheable.
     """
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
-    return f"{AGENT_INSTRUCTIONS}\nCurrent date and time: {now} UTC."
+    return (
+        f"{AGENT_INSTRUCTIONS}\nCurrent date and time: {now} UTC.\n"
+        f"The customer's name is {wrapper.context.user_name}."
+    )
 
 
 class RetentionSQLiteSession(SQLiteSession):
@@ -208,28 +212,37 @@ class TurnRunner:
         )
         logger.info("Agent created | model=%s", settings.chat_model)
 
-    async def run(self, session_id: str, text: str) -> str:
+    async def run(self, conversation_id: uuid.UUID, user_name: str, text: str) -> str:
         """Run one user turn and return Zoomer's reply.
 
         Any runtime error degrades to :data:`FALLBACK_TEXT`, so the chat never goes
         silent. The exchange is written to the message log after the run.
+
+        Args:
+            conversation_id: The conversation the turn belongs to. It is also the
+                SDK session id, so each conversation has its own history.
+            user_name: The signed-in customer's name, for the instructions.
+            text: The customer's message.
         """
         ctx = TurnContext(
-            session_id=session_id, turn_id=uuid.uuid4().hex, user_message=text.strip()
+            conversation_id=conversation_id,
+            user_name=user_name,
+            turn_id=uuid.uuid4().hex,
+            user_message=text.strip(),
         )
 
         try:
             result = await Runner.run(
                 self._agent,
                 ctx.user_message,
-                session=self._session(session_id),
+                session=self._session(conversation_id),
                 context=ctx,
                 max_turns=self._settings.agent_max_turns,
-                run_config=self._run_config(session_id),
+                run_config=self._run_config(conversation_id),
             )
             reply = (result.final_output or "").strip()
         except Exception:
-            logger.exception("agent run failed | session=%s", session_id)
+            logger.exception("agent run failed | conversation=%s", conversation_id)
             reply = ""
 
         if not reply:
@@ -239,17 +252,20 @@ class TurnRunner:
             await record_turn_messages(self._sessionmaker, ctx, reply)
         return reply
 
-    def _session(self, session_id: str) -> SQLiteSession:
+    def _session(self, conversation_id: uuid.UUID) -> SQLiteSession:
         _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
         return RetentionSQLiteSession(
-            session_id, str(_SESSIONS_DB), retention_days=self._settings.history_retention_days
+            str(conversation_id),
+            str(_SESSIONS_DB),
+            retention_days=self._settings.history_retention_days,
         )
 
-    def _run_config(self, session_id: str) -> RunConfig:
-        """Build the run config: history windowing and a ``session:<id>`` prompt cache key.
+    def _run_config(self, conversation_id: uuid.UUID) -> RunConfig:
+        """Build the run config: history windowing and a ``conversation:<id>`` prompt cache key.
 
         The cache key keeps a conversation's turns on one backend, so its prefix stays cached.
         """
-        model_settings = ModelSettings(extra_args={"prompt_cache_key": f"session:{session_id}"})
+        cache_key = f"conversation:{conversation_id}"
+        model_settings = ModelSettings(extra_args={"prompt_cache_key": cache_key})
         window = partial(window_history, turns=self._settings.history_window_turns)
         return RunConfig(session_input_callback=window, model_settings=model_settings)
