@@ -50,8 +50,8 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 5
     db_echo: bool = False  # True to log every SQL statement (noisy; dev only)
-    # Master switch for the message log. When off, writes no-op (the chat
-    # behaves identically).
+    # Master switch for the message log. When off, writes no-op: the chat still
+    # works, but reopened conversations show no transcript.
     message_log_enabled: bool = True
 
     # ── Sign-in ───────────────────────────────────────────────────────────
