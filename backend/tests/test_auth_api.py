@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.fakes import FakeUserStore
+from tests.fakes import FakeRateLimiter, FakeUserStore
 
 PHONE = "+380671234567"
 
@@ -60,3 +60,17 @@ def test_logout_ends_the_session(client: TestClient, fake_users: FakeUserStore) 
     me = client.get("/api/me")
     assert me.status_code == 401
     assert me.json()["error"]["code"] == "NOT_SIGNED_IN"
+
+
+def test_sign_in_over_the_rate_limit_gets_429(
+    client: TestClient, fake_users: FakeUserStore, fake_limiter: FakeRateLimiter
+) -> None:
+    fake_users.add(PHONE, "Mary")
+    fake_limiter.retry_after = 30
+
+    response = client.post("/api/auth/phone", json={"phone": PHONE})
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "30"
+    assert fake_limiter.hits == [("auth:ip:testclient", 10)]
+    assert client.get("/api/me").status_code == 401

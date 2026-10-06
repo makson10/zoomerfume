@@ -76,3 +76,16 @@ class FakeConversationStore:
             conversation.title = conversation_title(message)
         self.conversations.remove(conversation)
         self.conversations.insert(0, conversation)
+
+
+class FakeRateLimiter:
+    """Stands in for ``RateLimiter``: records each hit and allows them all until
+    ``retry_after`` is set."""
+
+    def __init__(self) -> None:
+        self.hits: list[tuple[str, int]] = []
+        self.retry_after: int | None = None
+
+    async def hit(self, key: str, limit: int) -> int | None:
+        self.hits.append((key, limit))
+        return self.retry_after

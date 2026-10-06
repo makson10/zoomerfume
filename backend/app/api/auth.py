@@ -9,10 +9,10 @@ import logging
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
 
-from app.api.deps import AppSettings, CurrentUser, Users
+from app.api.deps import AppSettings, CurrentUser, Users, limit_sign_in
 from app.api.errors import ApiError
 from app.core.config import Settings
 from app.core.validators import validate_name, validate_phone
@@ -73,14 +73,14 @@ def _valid_phone(raw: str, settings: Settings) -> str:
     return phone
 
 
-@router.post("/auth/phone")
+@router.post("/auth/phone", dependencies=[Depends(limit_sign_in)])
 async def sign_in_with_phone(
     body: PhoneRequest, request: Request, users: Users, settings: AppSettings
 ) -> PhoneResponse:
     """Sign in a known customer by phone number, or ask a new one for their name.
 
     Raises:
-        ApiError: 422 ``INVALID_PHONE``.
+        ApiError: 422 ``INVALID_PHONE``, 429 over the sign-in rate limit.
     """
     phone = _valid_phone(body.phone, settings)
     user = await users.get_by_phone(phone)
@@ -95,14 +95,18 @@ async def sign_in_with_phone(
     )
 
 
-@router.post("/auth/create", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/auth/create",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(limit_sign_in)],
+)
 async def create_account(
     body: CreateUserRequest, request: Request, users: Users, settings: AppSettings
 ) -> SignInResponse:
     """Create an account for a new customer and sign them in.
 
     Raises:
-        ApiError: 422 ``INVALID_PHONE`` or ``INVALID_NAME``.
+        ApiError: 422 ``INVALID_PHONE`` or ``INVALID_NAME``, 429 over the sign-in rate limit.
     """
     phone = _valid_phone(body.phone, settings)
     name = validate_name(body.name)

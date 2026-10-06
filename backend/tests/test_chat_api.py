@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db.models import User
-from tests.fakes import FakeConversationStore, FakeTurnRunner, FakeUserStore
+from tests.fakes import FakeConversationStore, FakeRateLimiter, FakeTurnRunner, FakeUserStore
 
 
 def test_health_returns_ok(client: TestClient) -> None:
@@ -76,4 +76,25 @@ def test_chat_hides_other_users_conversations(
     )
 
     assert response.status_code == 404
+    assert fake_runner.calls == []
+
+
+def test_chat_over_the_rate_limit_gets_429(
+    client: TestClient,
+    user: User,
+    fake_conversations: FakeConversationStore,
+    fake_limiter: FakeRateLimiter,
+    fake_runner: FakeTurnRunner,
+) -> None:
+    conversation = fake_conversations.add(user.id)
+    fake_limiter.retry_after = 42
+
+    response = client.post(
+        "/api/chat", json={"conversation_id": str(conversation.id), "message": "hi"}
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "42"
+    assert response.json()["error"]["code"] == "RATE_LIMITED"
+    assert fake_limiter.hits[-1] == (f"chat:user:{user.id}", 20)
     assert fake_runner.calls == []

@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     # Region used to read phone numbers typed without a country code.
     phone_default_region: str = "UA"
 
+    # ── Rate limits ───────────────────────────────────────────────────────
+    # Fixed one-minute windows: chat messages per user, sign-in attempts per IP.
+    rate_limit_chat_per_min: int = 20
+    rate_limit_auth_per_min: int = 10
+
     debug: bool = False
 
 

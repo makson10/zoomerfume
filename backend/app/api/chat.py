@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent.runtime import TurnRunner
 from app.api.conversations import require_conversation
-from app.api.deps import Conversations, CurrentUser, get_turn_runner
+from app.api.deps import Conversations, CurrentUser, get_turn_runner, limit_chat
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -26,7 +26,7 @@ class ChatResponse(BaseModel):
     reply: str
 
 
-@router.post("/chat")
+@router.post("/chat", dependencies=[Depends(limit_chat)])
 async def chat(
     body: ChatRequest,
     user: CurrentUser,
@@ -36,7 +36,8 @@ async def chat(
     """Return Zoomer's reply to one message in one of the user's conversations.
 
     Raises:
-        ApiError: 401 when nobody is signed in, 404 when the conversation isn't the user's.
+        ApiError: 401 when nobody is signed in, 429 over the rate limit, 404 when the
+            conversation isn't the user's.
     """
     conversation = await require_conversation(conversations, body.conversation_id, user)
     await conversations.mark_active(conversation, body.message)

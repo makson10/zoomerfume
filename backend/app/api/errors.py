@@ -13,13 +13,21 @@ class ApiError(Exception):
         status_code: The HTTP status.
         code: A stable machine-readable code, e.g. ``INVALID_PHONE``.
         message: A short text for the customer.
+        headers: Extra response headers, e.g. ``Retry-After``.
     """
 
-    def __init__(self, status_code: int, code: str, message: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.headers = headers
 
 
 async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
@@ -27,4 +35,5 @@ async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": {"code": exc.code, "message": exc.message}},
+        headers=exc.headers,
     )
