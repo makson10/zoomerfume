@@ -1,13 +1,10 @@
 import { useEffect, useState } from 'react'
+import { sendMessage } from '../api/chat.ts'
 
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
-}
-
-interface ChatResponse {
-  reply: string
 }
 
 const SESSION_KEY = 'zoomerfume:session-id'
@@ -37,18 +34,10 @@ export function useChat() {
     setError(null)
     setLoading(true)
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, message: text }),
-      })
-      if (!response.ok) {
-        throw new Error(`POST /api/chat failed with ${response.status}`)
-      }
-      const data: ChatResponse = await response.json()
+      const reply = await sendMessage(sessionId, text)
       setMessages((current) => [
         ...current,
-        { id: crypto.randomUUID(), role: 'assistant', content: data.reply },
+        { id: crypto.randomUUID(), role: 'assistant', content: reply },
       ])
     } catch {
       setError("Zoomer couldn't answer right now. Please try again.")
