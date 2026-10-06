@@ -2,8 +2,8 @@
 Application entry point: :func:`create_app` builds the FastAPI app.
 
 Lifespan events:
-  startup  → create the clients, the database engine and the turn runner;
-             verify Postgres / Qdrant connectivity
+  startup  → create the clients, the database engine, the session factory and the
+             turn runner; verify Postgres / Qdrant connectivity
   shutdown → close the clients and dispose the database engine
 """
 
@@ -16,9 +16,12 @@ from contextlib import asynccontextmanager
 from agents import set_default_openai_client
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.agent.runtime import TurnRunner
+from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
+from app.api.errors import ApiError, api_error_handler
 from app.api.health import router as health_router
 from app.api.spa import mount_web_chat
 from app.core.config import Settings, get_settings
@@ -28,6 +31,8 @@ from app.middleware.request_context import FastAPILoggingMiddleware
 from app.services.clients import create_openai_client, create_qdrant_client
 
 logger = logging.getLogger(__name__)
+
+SESSION_MAX_AGE_S = 30 * 24 * 60 * 60
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -53,17 +58,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     openai_client = create_openai_client(settings)
     qdrant_client = create_qdrant_client(settings)
     engine = create_db_engine(settings)
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     set_default_openai_client(openai_client)
-    app.state.turn_runner = TurnRunner(settings, async_sessionmaker(engine, expire_on_commit=False))
+    app.state.sessionmaker = sessionmaker
+    app.state.turn_runner = TurnRunner(settings, sessionmaker)
 
-    # 1. Verify Postgres connectivity (message log). Fail-open: the message log
-    #    is a side-write, so an unreachable DB only loses logging, never the chat.
-    if not settings.message_log_enabled:
-        logger.info("Message log disabled — skipping Postgres check")
-    elif await ping_db(engine):
-        logger.info("Postgres is reachable for the message log")
+    # 1. Verify Postgres connectivity. Users and conversations live there, so
+    #    the API can't serve signed-in requests until it is reachable.
+    if await ping_db(engine):
+        logger.info("Postgres is reachable")
     else:
-        logger.warning("Could not reach Postgres — message-log writes will be skipped")
+        logger.warning("Could not reach Postgres — sign-in and chat will fail until it is back")
 
     # 2. Verify Qdrant connectivity.
     try:
@@ -123,7 +128,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
 
     app.add_middleware(FastAPILoggingMiddleware)
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.session_secret,
+        session_cookie="zoomerfume_session",
+        max_age=SESSION_MAX_AGE_S,
+    )
+    app.add_exception_handler(ApiError, api_error_handler)
     app.include_router(health_router)
+    app.include_router(auth_router)
     app.include_router(chat_router)
     mount_web_chat(app)
     return app

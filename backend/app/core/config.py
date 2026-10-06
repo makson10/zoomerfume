@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -52,6 +53,12 @@ class Settings(BaseSettings):
     # Master switch for the message log. When off, writes no-op (the chat
     # behaves identically).
     message_log_enabled: bool = True
+
+    # ── Sign-in ───────────────────────────────────────────────────────────
+    # Signs the session cookie. A long random string, e.g. `openssl rand -hex 32`.
+    session_secret: str = Field(min_length=32)
+    # Region used to read phone numbers typed without a country code.
+    phone_default_region: str = "UA"
 
     debug: bool = False
 
