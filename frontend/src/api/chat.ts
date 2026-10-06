@@ -4,13 +4,13 @@ interface ChatResponse {
   reply: string
 }
 
-/** Send one message to Zoomer and return the reply. */
+/** Send one message to Zoomer in a conversation and return the reply. */
 export async function sendMessage(
-  sessionId: string,
+  conversationId: string,
   message: string,
 ): Promise<string> {
   const data = await postJson<ChatResponse>('/api/chat', {
-    session_id: sessionId,
+    conversation_id: conversationId,
     message,
   })
   return data.reply
