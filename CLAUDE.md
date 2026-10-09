@@ -127,7 +127,7 @@ Unit tests live in `backend/tests/` and run with pytest (`asyncio_mode = "auto"`
 
 Keep tests few and focused: the happy path plus the errors that matter. Replace external services with fakes at the boundary instead of starting them. The frontend has no test suite; it is checked by lint, formatting and the type-checked build.
 
-CI (`.github/workflows/ci.yml`) runs on pull requests and pushes to `dev` and `main`. Job `backend` runs `uv sync --frozen`, `ruff check`, `ruff format --check` and `pytest` in `backend/`. Job `frontend` runs `npm ci`, `npm run lint`, `npm run format:check` and `npm run build` in `frontend/`. Job `docker` builds the image with Buildx and caches its layers in the GitHub Actions cache.
+CI (`.github/workflows/ci.yml`) runs on pull requests and pushes to `dev` and `main`. Job `backend` runs `uv sync --frozen`, `ruff check`, `ruff format --check` and `pytest` in `backend/`. Job `frontend` runs `npm ci`, `npm run lint`, `npm run format:check` and `npm run build` in `frontend/`. Job `docker` builds the image with Buildx and caches its layers in the GitHub Actions cache. It pulls Docker Hub base images through the `mirror.gcr.io` mirror, because Docker Hub rate-limits anonymous pulls from shared runner IPs (429); BuildKit falls back to Docker Hub if the mirror fails.
 
 ## Configuration
 
