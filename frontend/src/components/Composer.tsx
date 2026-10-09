@@ -9,9 +9,16 @@ interface ComposerProps {
   onChange: (value: string) => void
   onSend: () => void
   disabled: boolean
+  placeholder?: string
 }
 
-export function Composer({ value, onChange, onSend, disabled }: ComposerProps) {
+export function Composer({
+  value,
+  onChange,
+  onSend,
+  disabled,
+  placeholder = 'Message Zoomer…',
+}: ComposerProps) {
   const canSend = !disabled && value.trim().length > 0
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -29,7 +36,7 @@ export function Composer({ value, onChange, onSend, disabled }: ComposerProps) {
     <Group align="flex-end" gap="xs" py="md" wrap="nowrap">
       <Textarea
         flex={1}
-        placeholder="Message Zoomer…"
+        placeholder={placeholder}
         aria-label="Message"
         autosize
         minRows={1}

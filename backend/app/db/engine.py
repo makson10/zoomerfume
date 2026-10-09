@@ -1,4 +1,4 @@
-"""Async SQLAlchemy engine for the message log.
+"""Async SQLAlchemy engine for the app database.
 
 The app lifespan creates the engine and disposes it on shutdown. Nothing connects
 until the first query.

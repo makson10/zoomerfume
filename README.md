@@ -2,7 +2,7 @@
 
 **Zoomer** is the AI shop assistant of **Zoomerfume**, a fictional Ukrainian online perfume shop. It recommends perfumes by taste, budget, occasion and season, compares products, answers shop questions (delivery, returns, payment, loyalty) and gives general perfume advice. The goal is a *grounded* assistant: answers about the shop come from a knowledge base the model searches through tools, with citations to the records it used, not from the model's memory.
 
-> **Status: early version.** The current version is a web chat with Zoomer on top of a non-streaming chat API, with no tools yet. Zoomer can talk about perfume in general, but it can't look up Zoomerfume's catalog, prices or policies, and it says so.
+> **Status: early version.** The current version is a web chat with Zoomer on top of a non-streaming chat API, with no tools yet. Customers sign in with a phone number and keep several conversations each. Zoomer can talk about perfume in general, but it can't look up Zoomerfume's catalog, prices or policies, and it says so.
 
 ## Stack
 
@@ -22,7 +22,7 @@ api (FastAPI + Agents SDK) ─────► OpenAI (chat + embeddings)
    │        │
    │        └───────────────────► Qdrant (knowledge-base vectors)
    ▼
-Postgres (message log; later users, conversations, notes, costs)
+Postgres (users, conversations, message log, rate limits; later notes, costs)
 ```
 
 One Docker image runs the API and serves the built web chat. Postgres and Qdrant run as separate services.
@@ -32,24 +32,33 @@ One Docker image runs the API and serves the built web chat. Postgres and Qdrant
 Requirements: Docker Desktop and an OpenAI API key.
 
 ```bash
-cp .env.example .env          # then set OPENAI_API_KEY in .env
+cp .env.example .env          # then set OPENAI_API_KEY and SESSION_SECRET in .env
 docker compose up --build
 ```
 
-Open http://localhost:8000 and chat with Zoomer. "New chat" starts a fresh conversation.
+`SESSION_SECRET` signs the session cookie; generate one with `openssl rand -hex 32`.
+
+Open http://localhost:8000. Zoomer asks for your phone number, and for your name if the number is new. There is no SMS code, since the shop is fictional. Your conversations are listed on the left; "New chat" starts another one. Log out to switch to a different customer.
 
 `docker compose up` also loads `docker-compose.override.yml` (auto-reload, host ports for Postgres and Qdrant). Add `--watch` to sync backend code changes into the running container.
 
-Or talk to the API directly:
+Or talk to the API directly. The session lives in a cookie, so keep a cookie jar:
 
 ```bash
-curl -X POST localhost:8000/api/chat \
+curl -c jar -b jar -X POST localhost:8000/api/auth/phone \
+  -H 'content-type: application/json' -d '{"phone": "050 111 22 33"}'
+# → {"status": "need_name", ...} for a new number
+curl -c jar -b jar -X POST localhost:8000/api/auth/create \
+  -H 'content-type: application/json' -d '{"phone": "050 111 22 33", "name": "Mary"}'
+curl -b jar -X POST localhost:8000/api/conversations
+# → {"id": "<conversation id>", "title": null}
+curl -b jar -X POST localhost:8000/api/chat \
   -H 'content-type: application/json' \
-  -d '{"session_id": "demo", "message": "hi! what should I wear on a summer date?"}'
+  -d '{"conversation_id": "<conversation id>", "message": "hi! what should I wear on a summer date?"}'
 # → {"reply": "..."}
 ```
 
-Send another message with the same `session_id` to continue the conversation. Health check: `curl localhost:8000/health`.
+Send another message with the same `conversation_id` to continue the conversation. Health check: `curl localhost:8000/health`.
 
 ## Local development (without Docker for the API)
 
@@ -104,7 +113,11 @@ All settings come from environment variables (`.env` for local runs). See `.env.
 | `HISTORY_WINDOW_TURNS` | `12` | How many recent user turns the model sees |
 | `DATABASE_URL` | local Compose DSN | Postgres connection (asyncpg) |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant connection |
-| `MESSAGE_LOG_ENABLED` | `true` | Write every exchange to the `messages` table |
+| `MESSAGE_LOG_ENABLED` | `true` | Write every exchange to the `messages` table; the web chat loads transcripts from it |
+| `SESSION_SECRET` | (required) | Signs the session cookie, at least 32 characters |
+| `PHONE_DEFAULT_REGION` | `UA` | Region for phone numbers typed without a country code |
+| `RATE_LIMIT_CHAT_PER_MIN` | `20` | Chat messages per customer per minute |
+| `RATE_LIMIT_AUTH_PER_MIN` | `10` | Sign-in attempts per IP address per minute |
 
 ## Project layout
 
@@ -112,18 +125,18 @@ All settings come from environment variables (`.env` for local runs). See `.env.
 zoomerfume/
 ├── backend/
 │   ├── app/
-│   │   ├── api/          HTTP routes (health, chat), web chat mount
+│   │   ├── api/          HTTP routes (health, auth, conversations, chat), web chat mount
 │   │   ├── agent/        Zoomer: agent runtime, prompt, per-turn context
-│   │   ├── core/         settings, logging
+│   │   ├── core/         settings, logging, input validation
 │   │   ├── db/           SQLAlchemy engine, models, message log
 │   │   ├── middleware/   request logging context
-│   │   └── services/     OpenAI and Qdrant clients
+│   │   └── services/     OpenAI and Qdrant clients, users, conversations, rate limits
 │   ├── alembic/          database migrations
 │   ├── scripts/          container entrypoint
 │   ├── tests/            pytest unit tests
 │   └── pyproject.toml    uv project (Python 3.12)
 ├── frontend/
-│   ├── src/              React app: page, components, chat hook, theme
+│   ├── src/              React app: pages, components, hooks, API client, theme
 │   ├── public/           logo
 │   └── package.json      npm project
 ├── .github/workflows/ci.yml      CI pipeline

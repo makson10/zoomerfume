@@ -24,13 +24,13 @@ async def record_turn_messages(
     """Persist the user message + Zoomer's reply for a turn."""
     rows = [
         Message(
-            conversation_id=ctx.session_id,
+            conversation_id=ctx.conversation_id,
             role="user",
             content=ctx.user_message,
             turn_id=ctx.turn_id,
         ),
         Message(
-            conversation_id=ctx.session_id,
+            conversation_id=ctx.conversation_id,
             role="assistant",
             content=reply,
             turn_id=ctx.turn_id,

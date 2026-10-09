@@ -7,9 +7,16 @@ interface MessageListProps {
   messages: ChatMessage[]
   loading: boolean
   error: string | null
+  /** Shown while there are no messages yet. */
+  emptyText?: string
 }
 
-export function MessageList({ messages, loading, error }: MessageListProps) {
+export function MessageList({
+  messages,
+  loading,
+  error,
+  emptyText,
+}: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -18,10 +25,9 @@ export function MessageList({ messages, loading, error }: MessageListProps) {
 
   return (
     <Stack gap="sm" py="md">
-      {messages.length === 0 && !loading && (
+      {messages.length === 0 && !loading && emptyText && (
         <Text c="dimmed" ta="center" pt="xl">
-          Hi, I'm Zoomer! Ask me about perfume: notes, seasons, occasions or
-          gift ideas.
+          {emptyText}
         </Text>
       )}
       {messages.map((message) => (
