@@ -34,10 +34,12 @@ export function useSession() {
   async function logOut() {
     try {
       await postLogOut()
-    } finally {
-      setUser(null)
-      setGreeting(null)
+    } catch {
+      window.alert('Could not log out. Please try again.')
+      return
     }
+    setUser(null)
+    setGreeting(null)
   }
 
   return { user, greeting, signedIn, logOut }
