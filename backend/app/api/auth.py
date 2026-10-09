@@ -84,7 +84,7 @@ async def sign_in_with_phone(
     """
     phone = _valid_phone(body.phone, settings)
     user = await users.get_by_phone(phone)
-    logger.info("sign-in | phone=%s known=%s", phone, user is not None)
+    logger.info("sign-in | known=%s", user is not None)
     if user is None:
         return PhoneResponse(
             status="need_name", phone=phone, message="Nice to meet you! What should I call you?"
