@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,9 +50,20 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 5
     db_echo: bool = False  # True to log every SQL statement (noisy; dev only)
-    # Master switch for the message log. When off, writes no-op (the chat
-    # behaves identically).
+    # Master switch for the message log. When off, writes no-op: the chat still
+    # works, but reopened conversations show no transcript.
     message_log_enabled: bool = True
+
+    # ── Sign-in ───────────────────────────────────────────────────────────
+    # Signs the session cookie. A long random string, e.g. `openssl rand -hex 32`.
+    session_secret: str = Field(min_length=32)
+    # Region used to read phone numbers typed without a country code.
+    phone_default_region: str = "UA"
+
+    # ── Rate limits ───────────────────────────────────────────────────────
+    # Fixed one-minute windows: chat messages per user, sign-in attempts per IP.
+    rate_limit_chat_per_min: int = 20
+    rate_limit_auth_per_min: int = 10
 
     debug: bool = False
 

@@ -1,4 +1,13 @@
 import { useEffect, useState } from 'react'
+import { sendMessage } from '../api/chat.ts'
+import { ApiError } from '../api/client.ts'
+import {
+  createConversation,
+  fetchMessages,
+  listConversations,
+  type Conversation,
+  type StoredMessage,
+} from '../api/conversations.ts'
 
 export interface ChatMessage {
   id: string
@@ -6,28 +15,72 @@ export interface ChatMessage {
   content: string
 }
 
-interface ChatResponse {
-  reply: string
+const FALLBACK_ERROR = "Zoomer couldn't answer right now. Please try again."
+
+function errorText(error: unknown): string {
+  return error instanceof ApiError && error.code
+    ? error.message
+    : FALLBACK_ERROR
 }
 
-const SESSION_KEY = 'zoomerfume:session-id'
+function toChatMessage(message: StoredMessage): ChatMessage {
+  return {
+    id: String(message.id),
+    role: message.role,
+    content: message.content,
+  }
+}
 
 /**
- * Chat state for one session with Zoomer.
+ * The signed-in user's conversations and the open one.
  *
- * The session id is kept in localStorage, and "New chat" replaces it with a fresh one.
+ * The most recent conversation opens on load. "New chat" only clears the view;
+ * the conversation is created when its first message is sent.
  */
 export function useChat() {
-  const [sessionId, setSessionId] = useState(
-    () => localStorage.getItem(SESSION_KEY) ?? crypto.randomUUID(),
-  )
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    localStorage.setItem(SESSION_KEY, sessionId)
-  }, [sessionId])
+    let ignore = false
+    listConversations().then(
+      (list) => {
+        if (ignore) return
+        setConversations(list)
+        if (list.length > 0) {
+          void openConversation(list[0].id)
+        } else {
+          setLoading(false)
+        }
+      },
+      (error) => {
+        if (ignore) return
+        setError(errorText(error))
+        setLoading(false)
+      },
+    )
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  async function openConversation(id: string) {
+    setActiveId(id)
+    setMessages([])
+    setError(null)
+    setLoading(true)
+    try {
+      const stored = await fetchMessages(id)
+      setMessages(stored.map(toChatMessage))
+    } catch (error) {
+      setError(errorText(error))
+    } finally {
+      setLoading(false)
+    }
+  }
 
   async function send(text: string) {
     setMessages((current) => [
@@ -37,31 +90,35 @@ export function useChat() {
     setError(null)
     setLoading(true)
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, message: text }),
-      })
-      if (!response.ok) {
-        throw new Error(`POST /api/chat failed with ${response.status}`)
-      }
-      const data: ChatResponse = await response.json()
+      const id = activeId ?? (await createConversation()).id
+      setActiveId(id)
+      const reply = await sendMessage(id, text)
       setMessages((current) => [
         ...current,
-        { id: crypto.randomUUID(), role: 'assistant', content: data.reply },
+        { id: crypto.randomUUID(), role: 'assistant', content: reply },
       ])
-    } catch {
-      setError("Zoomer couldn't answer right now. Please try again.")
+      listConversations().then(setConversations, () => undefined)
+    } catch (error) {
+      setError(errorText(error))
     } finally {
       setLoading(false)
     }
   }
 
   function newChat() {
-    setSessionId(crypto.randomUUID())
+    setActiveId(null)
     setMessages([])
     setError(null)
   }
 
-  return { messages, loading, error, send, newChat }
+  return {
+    conversations,
+    activeId,
+    messages,
+    loading,
+    error,
+    send,
+    newChat,
+    openConversation,
+  }
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 
 
@@ -9,7 +10,9 @@ from dataclasses import dataclass
 class TurnContext:
     """Mutable context passed into ``Runner.run(..., context=ctx)``."""
 
-    session_id: str
+    conversation_id: uuid.UUID
+    # The signed-in customer's name, shown to the model in the instructions.
+    user_name: str
     # Correlates this turn's message-log rows (user message ↔ reply).
     turn_id: str
     # The exact text the agent saw this turn.

@@ -1,6 +1,5 @@
 import {
   ActionIcon,
-  Button,
   Group,
   Image,
   Text,
@@ -8,14 +7,17 @@ import {
   useComputedColorScheme,
   useMantineColorScheme,
 } from '@mantine/core'
-import { IconMoon, IconPlus, IconSun } from '@tabler/icons-react'
+import { IconMoon, IconSun } from '@tabler/icons-react'
+import type { ReactNode } from 'react'
 
 interface HeaderProps {
-  onNewChat: () => void
-  newChatDisabled: boolean
+  /** The navbar toggle for small screens, on pages with a navbar. */
+  burger?: ReactNode
+  /** Controls shown before the color scheme toggle. */
+  actions?: ReactNode
 }
 
-export function Header({ onNewChat, newChatDisabled }: HeaderProps) {
+export function Header({ burger, actions }: HeaderProps) {
   const { setColorScheme } = useMantineColorScheme()
   const colorScheme = useComputedColorScheme('light')
   const nextColorScheme = colorScheme === 'dark' ? 'light' : 'dark'
@@ -23,6 +25,7 @@ export function Header({ onNewChat, newChatDisabled }: HeaderProps) {
   return (
     <Group h="100%" px="md" justify="space-between" wrap="nowrap">
       <Group gap="xs" wrap="nowrap">
+        {burger}
         <Image src="/logo.svg" alt="" w={28} h={28} />
         <Title order={1} size="h4">
           Zoomerfume
@@ -32,14 +35,7 @@ export function Header({ onNewChat, newChatDisabled }: HeaderProps) {
         </Text>
       </Group>
       <Group gap="xs" wrap="nowrap">
-        <Button
-          variant="default"
-          leftSection={<IconPlus size={16} />}
-          onClick={onNewChat}
-          disabled={newChatDisabled}
-        >
-          New chat
-        </Button>
+        {actions}
         <ActionIcon
           variant="default"
           size="input-sm"

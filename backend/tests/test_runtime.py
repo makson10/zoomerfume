@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -69,5 +70,5 @@ async def test_turn_runner_returns_the_reply_or_the_fallback(
     monkeypatch.setattr(Runner, "run", fake_run)
     runner = TurnRunner(settings, async_sessionmaker())
 
-    assert await runner.run("demo", "hi") == expected
+    assert await runner.run(uuid.uuid4(), "Mary", "hi") == expected
     fake_run.assert_awaited_once()
