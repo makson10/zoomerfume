@@ -135,7 +135,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session_cookie="zoomerfume_session",
         max_age=SESSION_MAX_AGE_S,
     )
+    from fastapi import Request, status
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse
+
+    async def validation_error_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        return await api_error_handler(
+            request,
+            ApiError(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "INVALID_REQUEST",
+                "Please check your input and try again.",
+            ),
+        )
+
     app.add_exception_handler(ApiError, api_error_handler)
+    app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(conversations_router)
