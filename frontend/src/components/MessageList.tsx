@@ -9,6 +9,7 @@ interface MessageListProps {
   error: string | null
   /** Shown while there are no messages yet. */
   emptyText?: string
+  onOpenRecord?: (recordId: string) => void
 }
 
 export function MessageList({
@@ -16,6 +17,7 @@ export function MessageList({
   loading,
   error,
   emptyText,
+  onOpenRecord,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -31,7 +33,11 @@ export function MessageList({
         </Text>
       )}
       {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
+        <MessageBubble
+          key={message.id}
+          message={message}
+          onOpenRecord={onOpenRecord}
+        />
       ))}
       {loading && <Loader type="dots" size="sm" />}
       {error && <Alert color="red">{error}</Alert>}

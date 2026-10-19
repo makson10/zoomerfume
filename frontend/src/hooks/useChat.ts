@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { sendMessage } from '../api/chat.ts'
+import { sendMessage, type Citations, type Step } from '../api/chat.ts'
 import { ApiError } from '../api/client.ts'
 import {
   createConversation,
@@ -13,6 +13,9 @@ export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  /** Set on Zoomer's replies that have a recorded turn. */
+  citations?: Citations | null
+  steps?: Step[]
 }
 
 const FALLBACK_ERROR = "Zoomer couldn't answer right now. Please try again."
@@ -28,6 +31,8 @@ function toChatMessage(message: StoredMessage): ChatMessage {
     id: String(message.id),
     role: message.role,
     content: message.content,
+    citations: message.citations,
+    steps: message.steps,
   }
 }
 
@@ -92,10 +97,16 @@ export function useChat() {
     try {
       const id = activeId ?? (await createConversation()).id
       setActiveId(id)
-      const reply = await sendMessage(id, text)
+      const { reply, citations, steps } = await sendMessage(id, text)
       setMessages((current) => [
         ...current,
-        { id: crypto.randomUUID(), role: 'assistant', content: reply },
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: reply,
+          citations,
+          steps,
+        },
       ])
       listConversations().then(setConversations, () => undefined)
     } catch (error) {

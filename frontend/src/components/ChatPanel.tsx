@@ -11,6 +11,8 @@ interface ChatPanelProps {
   emptyText?: string
   placeholder?: string
   onSend: (text: string) => void
+  /** Opens a cited record. Without it, citations stay plain text. */
+  onOpenRecord?: (recordId: string) => void
 }
 
 /** The message list with the composer under it. Sending is blocked while loading. */
@@ -21,6 +23,7 @@ export function ChatPanel({
   emptyText,
   placeholder,
   onSend,
+  onOpenRecord,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState('')
 
@@ -43,6 +46,7 @@ export function ChatPanel({
           loading={loading}
           error={error}
           emptyText={emptyText}
+          onOpenRecord={onOpenRecord}
         />
       </ScrollArea>
       <Composer
