@@ -22,8 +22,6 @@ htmlcov/
 .env.*
 !.env.example
 
-# Runtime data (local SQLite sessions)
-backend/data/
 
 # Editor
 .vscode/

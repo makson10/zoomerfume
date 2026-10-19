@@ -2,8 +2,8 @@
 Application entry point: :func:`create_app` builds the FastAPI app.
 
 Lifespan events:
-  startup  → create the clients, the database engine, the session factory and the
-             turn runner; verify Postgres / Qdrant connectivity
+  startup  → create the clients, the database engine, the session factory, the
+             knowledge base and the turn runner; verify Postgres / Qdrant connectivity
   shutdown → close the clients and dispose the database engine
 """
 
@@ -24,10 +24,13 @@ from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
 from app.api.errors import ApiError, api_error_handler
 from app.api.health import router as health_router
+from app.api.records import router as records_router
 from app.api.spa import mount_web_chat
+from app.api.tools import router as tools_router
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.db.engine import create_db_engine, ping_db
+from app.kb.knowledge_base import KnowledgeBase
 from app.middleware.request_context import FastAPILoggingMiddleware
 from app.services.clients import create_openai_client, create_qdrant_client
 
@@ -50,7 +53,7 @@ async def _safe(coro: Awaitable[object], *, success: str, failure: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Create the clients, the engine and the turn runner, and close them on shutdown."""
+    """Create the clients, the engine and the objects built on them; close them on shutdown."""
     settings: Settings = app.state.settings
 
     # ── STARTUP ───────────────────────────────────────────────────────────────
@@ -61,8 +64,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     engine = create_db_engine(settings)
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     set_default_openai_client(openai_client)
+    kb = KnowledgeBase(settings, qdrant_client, openai_client, sessionmaker)
     app.state.sessionmaker = sessionmaker
-    app.state.turn_runner = TurnRunner(settings, sessionmaker)
+    app.state.kb = kb
+    app.state.turn_runner = TurnRunner(settings, engine, kb)
 
     # 1. Verify Postgres connectivity. Users and conversations live there, so
     #    the API can't serve signed-in requests until it is reachable.
@@ -157,5 +162,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(conversations_router)
     app.include_router(chat_router)
+    app.include_router(records_router)
+    app.include_router(tools_router)
     mount_web_chat(app)
     return app

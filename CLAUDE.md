@@ -6,7 +6,7 @@ This file gives Claude Code the project context and operating rules for the Zoom
 
 Zoomerfume is a fictional Ukrainian online perfume shop (prices in UAH). This repository is its AI shop assistant, **Zoomer**: a chat bot that recommends perfumes, compares products, answers shop questions and gives general perfume advice. The goal is a *grounded* assistant: answers about the shop must come from a knowledge base the model searches through tools, with citations, never from the model's memory.
 
-Current state: a web chat with Zoomer on top of a non-streaming chat API, with no tools yet. Customers sign in with a phone number and keep several conversations each. The knowledge base (`backend/corpus/`, 96 records) is chunked, embedded and stored in Qdrant by a command-line ingest, and can be searched from the command line. Zoomer doesn't use it yet: it can talk about perfume in general but can't look up the shop's catalog, prices or policies, and says so.
+Current state: a web chat with Zoomer on top of a non-streaming chat API. Customers sign in with a phone number and keep several conversations each. The knowledge base (`backend/corpus/`, 96 records) is chunked, embedded and stored in Qdrant by a command-line ingest. Zoomer answers shop questions through two tools, `search_kb` and `open_record`, and cites the records it used as `[KB-042]`; general perfume questions need no tools. The web chat shows citations as chips that open the full record, a step log under each answer and the tool schemas.
 
 The repository root is a single git repo. Backend code lives in `backend/` and the web chat in `frontend/`; Docker files, `.env.example` and docs live at the root.
 
@@ -15,12 +15,17 @@ The repository root is a single git repo. Backend code lives in `backend/` and t
 ```
 browser ── GET / ─────────────────────► api: static files from /app/static (the built frontend)
 browser ── /api/auth/*, /api/me ──────► api (app/api/auth.py) ──► Postgres users, rate_limits
-browser ── /api/conversations/* ──────► api (app/api/conversations.py) ──► Postgres conversations, messages
+browser ── /api/conversations/* ──────► api (app/api/conversations.py) ──► Postgres conversations, messages, turns, tool_steps
+browser ── /api/records/{id} ─────────► api (app/api/records.py) ──► Postgres kb_records
+browser ── /api/tools/schema ─────────► api (app/api/tools.py): the tool objects' JSON schemas
 browser ── POST /api/chat ────────────► api (FastAPI, app/api/chat.py)
                                           │
                                           ├── session cookie ──► user, rate limit, conversation owner check
+                                          ├── TurnStore ─────────► Postgres  turns, tool_steps
                                           ├── TurnRunner.run() ──► OpenAI Responses API (CHAT_MODEL)
-                                          ├── history ───────────► SQLite    data/agents/sessions.db
+                                          │     ├── search_kb ────► OpenAI embeddings ──► Qdrant kb_chunks
+                                          │     └── open_record ──► Postgres  kb_records
+                                          ├── history ───────────► Postgres  agent_sessions, agent_messages
                                           └── message log ───────► Postgres  messages table (fail-open)
 
 app startup:        ping Postgres + Qdrant (a failure is logged, never fatal)
@@ -29,18 +34,18 @@ one-off ingest:     python -m app.kb.ingest ──► corpus/KB-*.md ──► c
                                                  ──► Qdrant kb_chunks + Postgres kb_records
 ```
 
-The API pings Qdrant at startup but doesn't search it yet. Only the `app.kb` command-line tools read and write the `kb_chunks` collection.
+The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb` ingest command writes it.
 
 ## Repository Layout
 
 - `backend/app/`: the FastAPI application
-  - `api/`: HTTP routes (`health.py`, `auth.py`, `conversations.py`, `chat.py`), route dependencies (`deps.py`), the JSON error body (`errors.py`) and the web chat mount (`spa.py`)
-  - `agent/`: Zoomer's runtime, system prompt and per-turn context
+  - `api/`: HTTP routes (`health.py`, `auth.py`, `conversations.py`, `chat.py`, `records.py`, `tools.py`), route dependencies (`deps.py`), the JSON error body (`errors.py`) and the web chat mount (`spa.py`)
+  - `agent/`: Zoomer's runtime (`runtime.py`), system prompt, per-turn context, the citation check (`citations.py`) and the tools (`tools/`: the envelope and its guard, `search_kb`, `open_record`)
   - `core/`: settings, logging setup, phone and name validation (`validators.py`)
   - `db/`: SQLAlchemy engine, models, fail-open write guard, message log
-  - `kb/`: the knowledge base: record parsing (`corpus.py`), chunking (`chunking.py`), embeddings, Qdrant storage (`store.py`), the `kb_records` table (`records.py`), and the command-line tools `ingest`, `search`, `check_corpus` and `eval_rephrase`
+  - `kb/`: the knowledge base: record parsing (`corpus.py`), chunking (`chunking.py`), embeddings, Qdrant storage (`store.py`), the `kb_records` table (`records.py`), search and record lookups for the tools and the API (`knowledge_base.py`), and the command-line tools `ingest`, `search`, `check_corpus` and `eval_rephrase`
   - `middleware/`: per-request logging context
-  - `services/`: OpenAI and Qdrant client constructors, users and the session cookie (`auth.py`), conversations (`conversations.py`), rate limits (`rate_limit.py`)
+  - `services/`: OpenAI and Qdrant client constructors, users and the session cookie (`auth.py`), conversations (`conversations.py`), rate limits (`rate_limit.py`), turns and tool steps (`turns.py`)
 - `backend/alembic/`: database migrations (`versions/0001_messages.py`, ...)
 - `backend/corpus/`: the knowledge base, one Markdown record per file (`KB-001.md` …)
 - `backend/eval/`: `rephrase.yaml`, rephrased questions for the retrieval check
@@ -49,13 +54,14 @@ The API pings Qdrant at startup but doesn't search it yet. Only the `app.kb` com
 - `backend/pyproject.toml`, `backend/uv.lock`: the uv project (Python 3.12)
 - `frontend/`: the web chat (Vite + React + TypeScript + Mantine)
   - `src/App.tsx`: picks the page: a loader, the sign-in chat or the chat page
-  - `src/api/`: the fetch wrapper (`client.ts`) and one module per API area (`auth.ts`, `conversations.ts`, `chat.ts`)
-  - `src/components/`: `ChatPage` (navbar + chat), `SignInFlow`, `ConversationList`, `ChatPanel` (message list + composer), `Header`, `MessageList`, `MessageBubble`, `Composer`
+  - `src/api/`: the fetch wrapper (`client.ts`) and one module per API area (`auth.ts`, `conversations.ts`, `chat.ts`, `records.ts`, `tools.ts`)
+  - `src/components/`: `ChatPage` (navbar + chat), `SignInFlow`, `ConversationList`, `ChatPanel` (message list + composer), `Header`, `MessageList`, `MessageBubble`, `MarkdownText`, `CitationChip`, `StepLog`, `RecordDrawer`, `ToolsModal`, `Composer`
   - `src/hooks/`: `useSession` (the signed-in user) and `useChat` (conversations and the open chat)
   - `src/theme.ts`: the Mantine theme
   - `public/logo.svg`: the logo, also used as the favicon
 - `.github/workflows/ci.yml`: the CI workflow
 - `docs/retrieval.md`: chunking, the HNSW index and the rephrase check results
+- `docs/architecture.md`: a chat turn: tools, the error envelope, the step cap, citations and what is stored
 - Root: `Dockerfile`, `docker-compose.yml`, `docker-compose.override.yml`, `.env.example`, `README.md`
 
 ## Entry Points
@@ -69,8 +75,10 @@ The API pings Qdrant at startup but doesn't search it yet. Only the `app.kb` com
   - `POST /api/auth/logout` → 204, the session is cleared
   - `GET /api/me` → `{id, name, phone_masked}`
   - `GET /api/conversations` → `[{id, title}]`, the most recently active first; `POST /api/conversations` → 201 `{id, title: null}`
-  - `GET /api/conversations/{id}/messages` → `[{id, role, content}]`, oldest first
-  - `POST /api/chat` `{conversation_id, message}` → `{reply}`; 422 on invalid input
+  - `GET /api/conversations/{id}/messages` → `[{id, role, content, turn_id, citations, steps}]`, oldest first; `citations` and `steps` are set on Zoomer's replies
+  - `POST /api/chat` `{conversation_id, message}` → `{reply, turn_id, citations: {valid, invalid, missing}, steps: [{step, tool, args, success, code, record_ids, duration_ms}]}`; 422 on invalid input
+  - `GET /api/records/{id}` → `{id, title, type, updated, header, body}`; 404 `NOT_FOUND`
+  - `GET /api/tools/schema` → `[{name, description, parameters, strict}]`, read from the tool objects the agent gets
   - Every `/api/*` route except `/api/auth/*` needs a signed-in user (401 otherwise). Someone else's conversation is a 404. Over a rate limit is a 429 with `Retry-After`. These errors have the body `{"error": {"code", "message"}}`; the `message` is written for the customer.
   - `GET /openapi.json` is served in every mode, so API types can be generated from it
   - `/docs` and `/redoc` only when `DEBUG=true`
@@ -86,7 +94,7 @@ The API pings Qdrant at startup but doesn't search it yet. Only the `app.kb` com
 - Runtime: Python 3.12, managed with uv. The Docker image installs from `uv.lock` with `uv sync --frozen`.
 - Web: FastAPI + uvicorn, pydantic v2, pydantic-settings.
 - LLM: OpenAI Agents SDK (`openai-agents`) on the OpenAI Responses API. Chat model `gpt-6-luna`, which rejects `temperature`, so the agent uses low reasoning effort instead.
-- Persistence: Postgres 17 through async SQLAlchemy 2 + asyncpg. Alembic migrations are hand-written. Agent conversation history lives in a SQLite file.
+- Persistence: Postgres 17 through async SQLAlchemy 2 + asyncpg. Alembic migrations are hand-written. Agent conversation history lives in Postgres too, through the Agents SDK's `SQLAlchemySession`.
 - Vector store: Qdrant (server and `qdrant-client`, both v1.19). Embeddings: `text-embedding-3-small`, 1536 dimensions. Chunk sizes are counted with `tiktoken` (`cl100k_base`). Record headers are YAML, read with PyYAML.
 - Logging: structlog on top of stdlib `logging`. JSON lines by default, colored console output when `DEBUG=true`.
 - Frontend: npm (CI and the Docker image use Node.js 22), Vite 8, React 19, TypeScript 6.0, Mantine 9, `react-markdown` with `remark-gfm`, Tabler icons.
@@ -99,16 +107,15 @@ A chat turn goes through these steps:
 
 1. `POST /api/chat` (`app/api/chat.py`) validates `{conversation_id, message}`. `message` is stripped and 1–4000 characters.
 2. Dependencies run first: `get_current_user` reads the user from the session cookie (401), and `limit_chat` counts the message against the user's rate limit (429). The route then loads the conversation only if it belongs to the user (404), titles it after its first message and moves it to the top of the list.
-3. The route gets the `TurnRunner` (`app/agent/runtime.py`) through the `get_turn_runner` dependency (`app/api/deps.py`). `TurnRunner.run()` builds a `TurnContext` and calls `Runner.run` with the runner's `Agent`.
+3. The route reads the records the tools returned in the conversation's earlier turns (`TurnStore.retrieved_ids()`) and inserts a `running` turn. It gets the `TurnRunner` (`app/agent/runtime.py`) through the `get_turn_runner` dependency (`app/api/deps.py`). `TurnRunner.run()` builds a `TurnContext` with the `KnowledgeBase` and calls `Runner.run` with the runner's `Agent`, whose tools are `search_kb` and `open_record` (`app/agent/tools/`).
 4. The agent's instructions are the static `AGENT_INSTRUCTIONS` (`app/agent/prompts.py`) plus the current date and time in UTC and the customer's name, recomputed on every run.
-5. History comes from `RetentionSQLiteSession` at `data/agents/sessions.db` (relative to the working directory), with the conversation id as the session id. The model input is capped two ways, and neither deletes stored rows:
-   - by age: `HISTORY_RETENTION_DAYS`, in `get_items()`
-   - by count: the last `HISTORY_WINDOW_TURNS` user turns, in `window_history()`
+5. History comes from the SDK's `SQLAlchemySession` on the app's engine, with the conversation id as the session id. Its tables `agent_sessions` and `agent_messages` are created by migration `0004`, not by the SDK. The model sees only the last `HISTORY_WINDOW_TURNS` user turns (`window_history()`, the run's `session_input_callback`); stored rows are never deleted. The window cuts only on turn boundaries, so a tool call is never separated from its output.
+6. Every request carries `prompt_cache_key = conversation:<conversation_id>`, and the run is capped at `AGENT_MAX_TURNS` (5) model calls. A run that needs more ends with `MAX_STEPS_TEXT` through the SDK's `max_turns` error handler, and the turn status is `max_steps`.
+7. Any runtime error, or an empty answer, becomes `FALLBACK_TEXT`, and the turn status is `failed`. The endpoint still answers 200.
+8. When `MESSAGE_LOG_ENABLED=true`, `record_turn_messages()` writes the user row and the assistant row to the `messages` table through `pg_guard`. Both rows point to the turn.
+9. For an `ok` turn, `check_citations()` (`app/agent/citations.py`) sorts the reply's `[KB-042]` citations into valid ones (a tool returned the record in this conversation) and invalid ones, and sets `missing` when this turn retrieved records but the reply cites none of them. A `failed` or `max_steps` turn gets empty citations, because its fixed text cites nothing. `TurnStore.finish()` stores the status, the citations and the tool steps, and the response returns them.
 
-   Both cut only on turn boundaries, so a tool call is never separated from its output.
-6. Every request carries `prompt_cache_key = conversation:<conversation_id>`, and the run is capped at `AGENT_MAX_TURNS` agent-loop iterations.
-7. Any runtime error, or an empty answer, becomes `FALLBACK_TEXT`, and the turn is marked `degraded`. The endpoint still answers 200.
-8. When `MESSAGE_LOG_ENABLED=true`, `record_turn_messages()` writes the user row and the assistant row to the `messages` table through `pg_guard`.
+**Tools.** Each tool is a `function_tool` wrapped in `tool_guard` (`app/agent/tools/envelope.py`). The tool returns a `ToolResult` (data and record ids) or raises `ToolError(code, message)`; the guard turns either one into the JSON envelope `{success: true, data}` or `{success: false, code, message}`, so a tool never raises. Any other exception becomes `UPSTREAM_ERROR` with a fixed message, and the exception text goes only to the log. The guard also appends a `Step` (tool, args, success, code, record ids, duration) to `TurnContext.steps`. Tools reach the knowledge base through `TurnContext.kb`, the `KnowledgeBase` (`app/kb/knowledge_base.py`) built in the lifespan; `GET /api/records/{id}` uses the same object. The SDK builds strict schemas from the signatures and docstrings: every property is required (optional ones are nullable) and `additionalProperties` is false. Details: `docs/architecture.md`.
 
 **Message log writes are fail-open.** `pg_guard` (`app/db/guard.py`) bounds the write to 5 seconds, and logs and swallows any error. A database problem must never break a chat turn. The web chat reads transcripts from this table, so with `MESSAGE_LOG_ENABLED=false` reopened conversations look empty.
 
@@ -116,9 +123,9 @@ A chat turn goes through these steps:
 
 **Rate limits.** `RateLimiter.hit()` (`app/services/rate_limit.py`) counts requests per key in fixed one-minute windows in the `rate_limits` table, with one atomic `INSERT … ON CONFLICT DO UPDATE … RETURNING count`. Keys are `chat:user:<id>` (`RATE_LIMIT_CHAT_PER_MIN`, checked in `limit_chat`) and `auth:ip:<client address>` (`RATE_LIMIT_AUTH_PER_MIN`, on `/api/auth/phone` and `/api/auth/create`). When a key opens a new window, rows older than a day are deleted. Postgres holds the counters, so the limits stay correct with several replicas.
 
-**Data access.** Routes reach Postgres through small stores (`UserStore`, `ConversationStore`, `RateLimiter`), each built per request on the `get_db` session. Tests replace the stores, not the database.
+**Data access.** Routes reach Postgres through small stores (`UserStore`, `ConversationStore`, `RateLimiter`, `TurnStore`), each built per request on the `get_db` session. Tests replace the stores, not the database.
 
-**Startup and shutdown.** `create_app(settings=None)` (`app/main.py`) loads the settings (or takes the ones passed in), sets up logging and stores the settings on `app.state`. Nothing runs at import time. After the routers it calls `mount_web_chat()` (`app/api/spa.py`), which mounts the frontend build at `/` only if `backend/static/index.html` exists (`/app/static` in the image). Without a build, as in unit tests or a backend run on the host, the app serves the API only. The lifespan creates the OpenAI and Qdrant clients and the SQLAlchemy engine, points the Agents SDK at the app's own `AsyncOpenAI` client through `set_default_openai_client`, and stores the session factory (`sessionmaker`) and one `TurnRunner` on `app.state`. It then pings Postgres and Qdrant; if either is down, it logs the error and keeps starting, and sign-in and chat fail until Postgres is back. Shutdown closes the clients and disposes the engine. `GET /health` is a liveness check that always returns `{"status": "ok"}`.
+**Startup and shutdown.** `create_app(settings=None)` (`app/main.py`) loads the settings (or takes the ones passed in), sets up logging and stores the settings on `app.state`. Nothing runs at import time. After the routers it calls `mount_web_chat()` (`app/api/spa.py`), which mounts the frontend build at `/` only if `backend/static/index.html` exists (`/app/static` in the image). Without a build, as in unit tests or a backend run on the host, the app serves the API only. The lifespan creates the OpenAI and Qdrant clients and the SQLAlchemy engine, points the Agents SDK at the app's own `AsyncOpenAI` client through `set_default_openai_client`, and stores the session factory (`sessionmaker`), the `KnowledgeBase` and one `TurnRunner` on `app.state`. It then pings Postgres and Qdrant; if either is down, it logs the error and keeps starting, and sign-in and chat fail until Postgres is back. Shutdown closes the clients and disposes the engine. `GET /health` is a liveness check that always returns `{"status": "ok"}`.
 
 **Dependencies.** Code gets settings and clients passed in; no module reads settings at import time. Routes get lifespan objects through FastAPI dependencies in `app/api/deps.py`, which read `app.state`. Add a new dependency there when a route first needs a new shared object.
 
@@ -126,16 +133,16 @@ A chat turn goes through these steps:
 
 **Migrations.** The container entrypoint runs `alembic upgrade head` before it starts uvicorn. `alembic/env.py` reads the DSN from the app settings, so the database URL is defined in exactly one place.
 
-**Web chat.** A single page with no router and no state library. On load, `useSession` calls `/api/me`; a 401 shows `SignInFlow`, where Zoomer asks for the phone and then the name as chat bubbles. Zoomer's first question is in the frontend, and every later line comes from the API's `message`. When signed in, `ChatPage` remounts per user. `useChat` loads the conversation list, opens the most recent conversation with its transcript, and keeps the rest in React state. "New chat" only clears the view: the first message creates the conversation, so the list never fills with empty chats. Sending and switching chats are blocked while a request is pending. API errors with a code show their `message` (a rate limit, for example); other failures show a generic line. All requests go through `src/api/client.ts`. Assistant replies render as Markdown (GFM tables included, raw HTML is not rendered); user messages render as plain text. The color scheme follows the system, and the header toggle overrides it. Keep the UI minimal and functional: stock Mantine components and the theme in `theme.ts`. In development the Vite dev server proxies `/api` to `localhost:8000`, so the browser never needs CORS. In the image, the first Docker stage builds the frontend and the runtime stage copies `frontend/dist` to `/app/static`.
+**Web chat.** A single page with no router and no state library. On load, `useSession` calls `/api/me`; a 401 shows `SignInFlow`, where Zoomer asks for the phone and then the name as chat bubbles. Zoomer's first question is in the frontend, and every later line comes from the API's `message`. When signed in, `ChatPage` remounts per user. `useChat` loads the conversation list, opens the most recent conversation with its transcript, and keeps the rest in React state. "New chat" only clears the view: the first message creates the conversation, so the list never fills with empty chats. Sending and switching chats are blocked while a request is pending. API errors with a code show their `message` (a rate limit, for example); other failures show a generic line. All requests go through `src/api/client.ts`. Assistant replies render as Markdown through `MarkdownText` (GFM tables included, raw HTML is not rendered); user messages render as plain text. In a reply, each `[KB-042]` citation becomes a `CitationChip` (red when invalid), with a "Sources" row of the valid ones under the bubble; a chip opens `RecordDrawer` with the full record from `/api/records/{id}`. `StepLog` under each reply lists the tool calls (collapsed) or says "No tools used", and flags invalid or missing citations. The header's Tools button opens `ToolsModal` with the tool schemas. On phones, Tools and Log out are icon buttons, so the header fits. The color scheme follows the system, and the header toggle overrides it. Keep the UI minimal and functional: stock Mantine components and the theme in `theme.ts`. In development the Vite dev server proxies `/api` to `localhost:8000`, so the browser never needs CORS. In the image, the first Docker stage builds the frontend and the runtime stage copies `frontend/dist` to `/app/static`.
 
 ## Tests
 
 Unit tests live in `backend/tests/` and run with pytest (`asyncio_mode = "auto"`). They never call OpenAI, Postgres or Qdrant:
 
 - `conftest.py` builds `Settings` in code with `_env_file=None`, so a real key in `.env` is never read.
-- The `client` fixture overrides `get_turn_runner`, `get_user_store`, `get_conversation_store` and `get_rate_limiter` with in-memory fakes from `tests/fakes.py`, and uses `TestClient` without `with`, so the lifespan never runs and nothing touches Postgres. The client keeps cookies, so the `user` fixture signs in through `/api/auth/phone` like a browser.
-- The fakes don't run SQL. The upserts in `UserStore` and `RateLimiter` are checked against a real database in the smoke checks.
-- Runtime tests replace `Runner.run` and run in a temporary directory, so no SQLite file is created in `backend/`.
+- The `client` fixture overrides `get_turn_runner`, `get_user_store`, `get_conversation_store`, `get_rate_limiter`, `get_turn_store` and `get_knowledge_base` with in-memory fakes from `tests/fakes.py`, and uses `TestClient` without `with`, so the lifespan never runs and nothing touches Postgres. The client keeps cookies, so the `user` fixture signs in through `/api/auth/phone` like a browser.
+- The fakes don't run SQL. The upserts in `UserStore` and `RateLimiter` and the queries in `TurnStore` are checked against a real database in the smoke checks.
+- Runtime tests run the real agent loop on the SDK's `ScriptedModel` (`agents.testing`), with in-memory history and a fake knowledge base. Tool tests call each tool through `on_invoke_tool`, the way the agent loop does.
 - Web chat tests mount a tiny fake build from a temporary directory.
 - Knowledge base tests cover header parsing, the corpus checks (including a run over the shipped `backend/corpus/`), chunk limits, overlap and breadcrumbs, point ids and search filters. `tiktoken` downloads the `cl100k_base` encoding on first use and caches it, so the first chunking test needs network access.
 
@@ -184,8 +191,14 @@ curl -c jar -b jar -X POST localhost:8000/api/auth/create \
 curl -b jar -X POST localhost:8000/api/conversations          # → {"id": "<uuid>", ...}
 curl -b jar -X POST localhost:8000/api/chat \
   -H 'content-type: application/json' -d '{"conversation_id": "<uuid>", "message": "hi"}'
+curl -b jar -X POST localhost:8000/api/chat \
+  -H 'content-type: application/json' -d '{"conversation_id": "<uuid>", "message": "vanilla and tobacco under 3000 UAH?"}'
+curl -b jar localhost:8000/api/records/KB-026      # a cited record
+curl -b jar localhost:8000/api/tools/schema        # the tool schemas
 docker compose exec postgres psql -U zoomer -d zoomerfume \
   -c 'select role, left(content, 60), created_at from messages order by id desc limit 4'
+docker compose exec postgres psql -U zoomer -d zoomerfume \
+  -c 'select t.status, t.citations, s.tool, s.record_ids from turns t left join tool_steps s on s.turn_id = t.id order by t.started_at desc limit 5'
 ```
 
 Knowledge base (needs the stack up; ingest and search call the OpenAI embeddings API, a full ingest costs well under a cent):
@@ -246,12 +259,12 @@ If the user asks Claude to run the project, the API or the full stack, Claude sh
 
 - Verify backend changes with `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest` and the smoke checks above. Verify frontend changes with `npm run lint`, `npm run format:check`, `npm run build` and a look at the page.
 - In `README.md` and `CLAUDE.md`, write each paragraph, list item and blockquote as one line. Don't hard-wrap prose at a fixed width; editors and GitHub wrap it. Code blocks, tables and the ASCII diagrams keep their own line breaks.
-- Agent history lives in the container filesystem (`/app/data/agents/sessions.db`), not on a volume. Recreating the `api` container (a rebuild, `docker compose down`) makes Zoomer forget every conversation, while the web chat still shows their transcripts from the `messages` table.
+- Agent history and transcripts both live in Postgres, so they survive a rebuilt or recreated `api` container. Only `docker compose down -v` (it deletes the `postgres_data` volume) makes Zoomer forget.
 - Localhost cookies are shared between ports, so the Vite dev server (`:5173`) and the API (`:8000`) share the `zoomerfume_session` cookie. The cookie has its own name so it doesn't clash with other local apps.
 - Two HTTP client libraries are installed: `openai` 3.x (and so the Agents SDK) uses `httpx2`/`httpcore2`, while `qdrant-client` uses `httpx` 0.28. Their loggers are quieted separately in `app/core/logging.py`. OpenAI failures surface as `openai.*` exceptions, not `httpx` ones.
 - TypeScript stays on 6.0, the version the Vite template pins.
 - The production build warns that the JS bundle is over 500 kB (Mantine, Markdown and icons). It is a single local page, so there is no code splitting yet.
 - Every chat check calls OpenAI and costs a little. Keep manual checks short.
 - After changing the chunking or the embedding model, run ingest with `--force`: the file hashes haven't changed, so a normal run would skip every record.
-- Right after records are deleted or shortened, `indexed_vectors_count` can be slightly higher than `points_count` until Qdrant cleans up the segment. On a fresh full ingest the two are equal.
+- `indexed_vectors_count` equals `points_count` only on a fresh collection. After any re-embed or delete it stays higher, because Qdrant vacuums only segments with at least 1,000 vectors. Search is not affected.
 - `.dockerignore` excludes only the repo docs (`README.md`, `CLAUDE.md`, `docs/`). The corpus is Markdown, so a broader `*.md` rule would ship an image with no records.

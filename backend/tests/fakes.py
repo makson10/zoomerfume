@@ -4,21 +4,30 @@ from __future__ import annotations
 
 import uuid
 
-from app.db.models import Conversation, Message, User
+from app.agent.citations import Citations
+from app.agent.context import Step, TurnStatus
+from app.agent.runtime import TurnResult
+from app.db.models import Conversation, KbRecord, Message, ToolStep, Turn, User
+from app.kb.search import Hit
 from app.services.conversations import conversation_title
 
 
 class FakeTurnRunner:
-    """Stands in for ``TurnRunner``: records each call and returns a canned reply."""
+    """Stands in for ``TurnRunner``: records each call and returns a canned reply, status and
+    steps."""
 
     reply = "fake reply"
+    status: TurnStatus = "ok"
 
     def __init__(self) -> None:
         self.calls: list[tuple[uuid.UUID, str, str]] = []
+        self.steps: list[Step] = []
 
-    async def run(self, conversation_id: uuid.UUID, user_name: str, text: str) -> str:
+    async def run(
+        self, turn_id: uuid.UUID, conversation_id: uuid.UUID, user_name: str, text: str
+    ) -> TurnResult:
         self.calls.append((conversation_id, user_name, text))
-        return self.reply
+        return TurnResult(reply=self.reply, status=self.status, steps=self.steps)
 
 
 class FakeUserStore:
@@ -89,3 +98,95 @@ class FakeRateLimiter:
     async def hit(self, key: str, limit: int) -> int | None:
         self.hits.append((key, limit))
         return self.retry_after
+
+
+def make_hit(record_id: str, score: float = 0.8) -> Hit:
+    return Hit(
+        record_id=record_id,
+        title=f"Record {record_id}",
+        type="product",
+        chunk_index=0,
+        section=f"Record {record_id} › Overview",
+        updated="2026-09-01",
+        score=score,
+        text=f"Text of {record_id}.",
+        price=2500,
+    )
+
+
+class FakeKnowledgeBase:
+    """Stands in for ``KnowledgeBase``: canned hits and records. Records every search, and
+    raises ``error`` when it is set."""
+
+    def __init__(self) -> None:
+        self.hits: list[Hit] = []
+        self.records: dict[str, KbRecord] = {}
+        self.searches: list[tuple[str, int, str | None, int | None]] = []
+        self.error: Exception | None = None
+
+    async def search(
+        self, query: str, k: int, record_type: str | None, max_price: int | None
+    ) -> list[Hit]:
+        self.searches.append((query, k, record_type, max_price))
+        if self.error is not None:
+            raise self.error
+        return self.hits[:k]
+
+    async def get_record(self, record_id: str) -> KbRecord | None:
+        return self.records.get(record_id)
+
+
+def make_step(record_ids: list[str]) -> Step:
+    return Step(
+        step=1,
+        tool="search_kb",
+        args={"query": "vanilla"},
+        success=True,
+        code=None,
+        record_ids=record_ids,
+        duration_ms=12,
+    )
+
+
+class FakeTurnStore:
+    """Stands in for ``TurnStore`` with turns and their steps kept in memory."""
+
+    def __init__(self) -> None:
+        self.turns: dict[uuid.UUID, Turn] = {}
+
+    def add(
+        self, conversation_id: uuid.UUID, citations: Citations | None, steps: list[Step]
+    ) -> Turn:
+        turn = Turn(id=uuid.uuid4(), conversation_id=conversation_id, status="running")
+        self.turns[turn.id] = turn
+        self._finish(turn, "ok", citations, steps)
+        return turn
+
+    def _finish(
+        self, turn: Turn, status: str, citations: Citations | None, steps: list[Step]
+    ) -> None:
+        turn.status = status
+        turn.citations = citations.model_dump() if citations else None
+        turn.steps = [ToolStep(turn_id=turn.id, **step.model_dump()) for step in steps]
+
+    async def start(self, conversation_id: uuid.UUID) -> uuid.UUID:
+        turn = Turn(id=uuid.uuid4(), conversation_id=conversation_id, status="running")
+        self.turns[turn.id] = turn
+        return turn.id
+
+    async def finish(
+        self, turn_id: uuid.UUID, status: TurnStatus, citations: Citations, steps: list[Step]
+    ) -> None:
+        self._finish(self.turns[turn_id], status, citations, steps)
+
+    async def retrieved_ids(self, conversation_id: uuid.UUID) -> set[str]:
+        return {
+            record_id
+            for turn in self.turns.values()
+            if turn.conversation_id == conversation_id
+            for step in turn.steps
+            for record_id in step.record_ids
+        }
+
+    async def for_conversation(self, conversation_id: uuid.UUID) -> list[Turn]:
+        return [turn for turn in self.turns.values() if turn.conversation_id == conversation_id]

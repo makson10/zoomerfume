@@ -7,8 +7,10 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import (
     get_conversation_store,
+    get_knowledge_base,
     get_rate_limiter,
     get_turn_runner,
+    get_turn_store,
     get_user_store,
 )
 from app.core.config import Settings
@@ -16,8 +18,10 @@ from app.db.models import User
 from app.main import create_app
 from tests.fakes import (
     FakeConversationStore,
+    FakeKnowledgeBase,
     FakeRateLimiter,
     FakeTurnRunner,
+    FakeTurnStore,
     FakeUserStore,
 )
 
@@ -31,6 +35,11 @@ def settings() -> Settings:
         session_secret="test-secret-" + "x" * 32,
         message_log_enabled=False,
     )
+
+
+@pytest.fixture
+def fake_kb() -> FakeKnowledgeBase:
+    return FakeKnowledgeBase()
 
 
 @pytest.fixture
@@ -54,12 +63,19 @@ def fake_limiter() -> FakeRateLimiter:
 
 
 @pytest.fixture
+def fake_turns() -> FakeTurnStore:
+    return FakeTurnStore()
+
+
+@pytest.fixture
 def client(
     settings: Settings,
     fake_runner: FakeTurnRunner,
     fake_users: FakeUserStore,
     fake_conversations: FakeConversationStore,
     fake_limiter: FakeRateLimiter,
+    fake_turns: FakeTurnStore,
+    fake_kb: FakeKnowledgeBase,
 ) -> TestClient:
     """API client on the fakes. It keeps cookies between requests, like a browser.
 
@@ -71,6 +87,8 @@ def client(
     app.dependency_overrides[get_user_store] = lambda: fake_users
     app.dependency_overrides[get_conversation_store] = lambda: fake_conversations
     app.dependency_overrides[get_rate_limiter] = lambda: fake_limiter
+    app.dependency_overrides[get_turn_store] = lambda: fake_turns
+    app.dependency_overrides[get_knowledge_base] = lambda: fake_kb
     return TestClient(app)
 
 

@@ -34,7 +34,6 @@ async def record_turn_messages(
             role="assistant",
             content=reply,
             turn_id=ctx.turn_id,
-            meta={"degraded": ctx.degraded},
         ),
     ]
     async with sessionmaker() as session:

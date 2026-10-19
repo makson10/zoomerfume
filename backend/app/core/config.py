@@ -25,22 +25,16 @@ class Settings(BaseSettings):
 
     # ── Agent runtime ─────────────────────────────────────────────────────
     # Hard ceiling on agent-loop iterations per turn. One "turn" is a single
-    # model call (which may batch several parallel tool calls); the Agents SDK
-    # raises MaxTurnsExceeded once this is passed. Bounds a pathological tool
-    # loop so a confused run can't burn tokens unchecked.
-    agent_max_turns: int = 15
+    # model call (which may batch several parallel tool calls). A run that needs
+    # more ends with a polite "couldn't finish" answer, so a confused tool loop
+    # can't burn tokens unchecked.
+    agent_max_turns: int = 5
     # Conversation-history window. Each turn the agent is fed only the last N
     # user turns verbatim; older turns are dropped from the *model input*
     # (never deleted from the stored session), so input-token cost and latency
     # stay flat on long chats. A "turn" = one user input plus the model's
     # response. 0 disables windowing (the whole session is sent).
     history_window_turns: int = 12
-    # Conversation-history age cap. Each turn the agent is fed only turns whose
-    # start falls within the last N days; older turns are dropped from the *model
-    # input* only. Complements history_window_turns: the age cap forgets stale
-    # context when a user returns after days, the turn cap bounds a chatty
-    # same-day session. 0 disables the age cap.
-    history_retention_days: int = 4
 
     # ── Knowledge base ────────────────────────────────────────────────────
     qdrant_url: str = "http://qdrant:6333"
