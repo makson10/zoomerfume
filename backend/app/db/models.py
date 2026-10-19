@@ -7,6 +7,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -17,7 +18,7 @@ from sqlalchemy import (
     Uuid,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -72,8 +73,9 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     # Shared by the user message and the reply it produced.
-    turn_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    turn_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("turns.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -82,6 +84,53 @@ class Message(Base):
         Index("ix_messages_conversation_created", "conversation_id", "created_at"),
         Index("ix_messages_turn_id", "turn_id"),
     )
+
+
+class Turn(Base):
+    """One customer message and Zoomer's work on it."""
+
+    __tablename__ = "turns"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    # "running" | "ok" | "max_steps" | "failed"
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    # {"valid": [...], "invalid": [...], "missing": bool}. Empty while the turn runs.
+    citations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("ix_turns_conversation_id", "conversation_id"),)
+
+
+class ToolStep(Base):
+    """One tool call the agent made during a turn."""
+
+    __tablename__ = "tool_steps"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    turn_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("turns.id", ondelete="CASCADE"), nullable=False
+    )
+    # 1, 2, ... in the order the calls finished.
+    step: Mapped[int] = mapped_column(Integer, nullable=False)
+    tool: Mapped[str] = mapped_column(String(64), nullable=False)
+    args: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # The error code of a failed call, e.g. "NOT_FOUND".
+    code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # The knowledge base records the call returned.
+    record_ids: Mapped[list[str]] = mapped_column(ARRAY(String(8)), nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("ix_tool_steps_turn_id", "turn_id"),)
 
 
 class RateLimit(Base):

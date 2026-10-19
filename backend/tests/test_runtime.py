@@ -8,7 +8,13 @@ from agents import SQLiteSession, set_tracing_disabled
 from agents.testing import ScriptedModel, assistant_message, function_call
 
 from app.agent import runtime
-from app.agent.runtime import FALLBACK_TEXT, MAX_STEPS_TEXT, TurnRunner, window_history
+from app.agent.runtime import (
+    FALLBACK_TEXT,
+    MAX_STEPS_TEXT,
+    TurnResult,
+    TurnRunner,
+    window_history,
+)
 from app.core.config import Settings
 from app.db.engine import create_db_engine
 from tests.fakes import FakeKnowledgeBase, make_hit
@@ -66,21 +72,27 @@ def _search_call(call_id: str) -> Any:
     return function_call("search_kb", args, call_id=call_id)
 
 
+async def _run(runner: TurnRunner, text: str) -> TurnResult:
+    return await runner.run(uuid.uuid4(), uuid.uuid4(), "Mary", text)
+
+
 @pytest.mark.parametrize(
-    ("step", "expected"),
+    ("step", "reply", "status"),
     [
-        ([assistant_message(" try a vanilla musk ")], "try a vanilla musk"),
-        ([assistant_message("   ")], FALLBACK_TEXT),
-        (RuntimeError("model is down"), FALLBACK_TEXT),
+        ([assistant_message(" try a vanilla musk ")], "try a vanilla musk", "ok"),
+        ([assistant_message("   ")], FALLBACK_TEXT, "failed"),
+        (RuntimeError("model is down"), FALLBACK_TEXT, "failed"),
     ],
     ids=["reply", "blank", "error"],
 )
 async def test_turn_runner_returns_the_reply_or_the_fallback(
-    runner: TurnRunner, step: Any, expected: str
+    runner: TurnRunner, step: Any, reply: str, status: str
 ) -> None:
     runner.agent.model = ScriptedModel([step])
 
-    assert await runner.run(uuid.uuid4(), "Mary", "hi") == expected
+    result = await _run(runner, "hi")
+
+    assert (result.reply, result.status, result.steps) == (reply, status, [])
 
 
 async def test_turn_runner_answers_after_a_tool_call(
@@ -90,10 +102,11 @@ async def test_turn_runner_answers_after_a_tool_call(
     model = ScriptedModel([[_search_call("c1")], [assistant_message("Try it [KB-012].")]])
     runner.agent.model = model
 
-    reply = await runner.run(uuid.uuid4(), "Mary", "something vanilla?")
+    result = await _run(runner, "something vanilla?")
 
-    assert reply == "Try it [KB-012]."
-    assert fake_kb.searches == [("vanilla", 5, None, None)]
+    assert (result.reply, result.status) == ("Try it [KB-012].", "ok")
+    assert [(step.tool, step.record_ids) for step in result.steps] == [("search_kb", ["KB-012"])]
+    assert result.retrieved_ids == {"KB-012"}
     model.assert_complete()
 
 
@@ -104,7 +117,7 @@ async def test_turn_runner_stops_politely_at_the_step_limit(
     calls = settings.agent_max_turns
     runner.agent.model = ScriptedModel([[_search_call(f"c{i}")] for i in range(calls)])
 
-    reply = await runner.run(uuid.uuid4(), "Mary", "compare everything")
+    result = await _run(runner, "compare everything")
 
-    assert reply == MAX_STEPS_TEXT.format(steps=5)
-    assert len(fake_kb.searches) == calls
+    assert (result.reply, result.status) == (MAX_STEPS_TEXT.format(steps=5), "max_steps")
+    assert len(result.steps) == len(fake_kb.searches) == calls

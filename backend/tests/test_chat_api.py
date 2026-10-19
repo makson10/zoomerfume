@@ -6,7 +6,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db.models import User
-from tests.fakes import FakeConversationStore, FakeRateLimiter, FakeTurnRunner, FakeUserStore
+from tests.fakes import (
+    FakeConversationStore,
+    FakeRateLimiter,
+    FakeTurnRunner,
+    FakeTurnStore,
+    FakeUserStore,
+    make_step,
+)
 
 
 def test_health_returns_ok(client: TestClient) -> None:
@@ -16,20 +23,33 @@ def test_health_returns_ok(client: TestClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_chat_returns_the_runner_reply(
+def test_chat_returns_the_reply_with_citations_and_steps(
     client: TestClient,
     user: User,
     fake_conversations: FakeConversationStore,
+    fake_turns: FakeTurnStore,
     fake_runner: FakeTurnRunner,
 ) -> None:
     conversation = fake_conversations.add(user.id)
+    fake_turns.add(conversation.id, citations=None, steps=[make_step(["KB-012"])])
+    fake_runner.reply = "Try KB-031 [KB-031], or KB-012 from before [KB-012], not [KB-099]."
+    fake_runner.steps = [make_step(["KB-031"])]
 
     response = client.post(
         "/api/chat", json={"conversation_id": str(conversation.id), "message": "  hi  "}
     )
 
     assert response.status_code == 200
-    assert response.json() == {"reply": FakeTurnRunner.reply}
+    body = response.json()
+    assert body["reply"] == fake_runner.reply
+    assert body["citations"] == {
+        "valid": ["KB-031", "KB-012"],
+        "invalid": ["KB-099"],
+        "missing": False,
+    }
+    assert body["steps"] == [make_step(["KB-031"]).model_dump()]
+    turn = fake_turns.turns[uuid.UUID(body["turn_id"])]
+    assert (turn.status, turn.citations) == ("ok", body["citations"])
     assert fake_runner.calls == [(conversation.id, "Mary", "hi")]
     assert conversation.title == "hi"
 

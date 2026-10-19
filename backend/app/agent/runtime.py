@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
 
@@ -25,7 +26,7 @@ from agents.items import TResponseInputItem
 from openai.types.shared import Reasoning
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
-from app.agent.context import TurnContext
+from app.agent.context import Step, TurnContext, TurnStatus
 from app.agent.prompts import AGENT_INSTRUCTIONS
 from app.agent.tools import TOOLS
 from app.core.config import Settings
@@ -115,6 +116,20 @@ def window_history(
     return history[cut:] + new_items
 
 
+@dataclass(frozen=True)
+class TurnResult:
+    """What one turn produced: the reply, how the run ended and the tool calls it made."""
+
+    reply: str
+    status: TurnStatus
+    steps: list[Step]
+
+    @property
+    def retrieved_ids(self) -> set[str]:
+        """The records this turn's tools returned."""
+        return {record_id for step in self.steps for record_id in step.record_ids}
+
+
 class TurnRunner:
     """Produces Zoomer's reply for one user message and logs the exchange.
 
@@ -138,14 +153,17 @@ class TurnRunner:
         )
         logger.info("Agent created | model=%s", settings.chat_model)
 
-    async def run(self, conversation_id: uuid.UUID, user_name: str, text: str) -> str:
-        """Run one user turn and return Zoomer's reply.
+    async def run(
+        self, turn_id: uuid.UUID, conversation_id: uuid.UUID, user_name: str, text: str
+    ) -> TurnResult:
+        """Run one user turn and return Zoomer's reply with the turn's status and steps.
 
         Any runtime error degrades to :data:`FALLBACK_TEXT`, and a run that hits
         ``AGENT_MAX_TURNS`` ends with :data:`MAX_STEPS_TEXT`, so the chat never goes
         silent. The exchange is written to the message log after the run.
 
         Args:
+            turn_id: The turn's row in ``turns``.
             conversation_id: The conversation the turn belongs to. It is also the
                 SDK session id, so each conversation has its own history.
             user_name: The signed-in customer's name, for the instructions.
@@ -154,7 +172,7 @@ class TurnRunner:
         ctx = TurnContext(
             conversation_id=conversation_id,
             user_name=user_name,
-            turn_id=uuid.uuid4().hex,
+            turn_id=turn_id,
             user_message=text.strip(),
             kb=self._kb,
         )
@@ -175,15 +193,16 @@ class TurnRunner:
             reply = ""
 
         if not reply:
-            ctx.degraded = True
+            ctx.status = "failed"
             reply = FALLBACK_TEXT
         if self._settings.message_log_enabled:
             await record_turn_messages(self._sessionmaker, ctx, reply)
-        return reply
+        return TurnResult(reply=reply, status=ctx.status, steps=ctx.steps)
 
     def _out_of_steps(self, data: RunErrorHandlerInput[TurnContext]) -> RunErrorHandlerResult:
         """End a run that hit the step limit with a polite answer instead of an error."""
         ctx = data.context.context
+        ctx.status = "max_steps"
         logger.warning(
             "agent hit the step limit | conversation=%s steps=%d",
             ctx.conversation_id,

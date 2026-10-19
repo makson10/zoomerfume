@@ -8,9 +8,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.agent.citations import Citations, check_citations
+from app.agent.context import Step
 from app.agent.runtime import TurnRunner
 from app.api.conversations import require_conversation
-from app.api.deps import Conversations, CurrentUser, get_turn_runner, limit_chat
+from app.api.deps import Conversations, CurrentUser, Turns, get_turn_runner, limit_chat
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -23,7 +25,12 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    """Zoomer's reply with its checked citations and the tool calls behind it."""
+
     reply: str
+    turn_id: uuid.UUID
+    citations: Citations
+    steps: list[Step]
 
 
 @router.post("/chat", dependencies=[Depends(limit_chat)])
@@ -31,9 +38,12 @@ async def chat(
     body: ChatRequest,
     user: CurrentUser,
     conversations: Conversations,
+    turns: Turns,
     runner: Annotated[TurnRunner, Depends(get_turn_runner)],
 ) -> ChatResponse:
     """Return Zoomer's reply to one message in one of the user's conversations.
+
+    The turn is stored with its status, its citations and its tool steps.
 
     Raises:
         ApiError: 401 when nobody is signed in, 429 over the rate limit, 404 when the
@@ -41,5 +51,11 @@ async def chat(
     """
     conversation = await require_conversation(conversations, body.conversation_id, user)
     await conversations.mark_active(conversation, body.message)
-    reply = await runner.run(conversation.id, user.name, body.message)
-    return ChatResponse(reply=reply)
+    retrieved_before = await turns.retrieved_ids(conversation.id)
+    turn_id = await turns.start(conversation.id)
+    result = await runner.run(turn_id, conversation.id, user.name, body.message)
+    citations = check_citations(result.reply, result.retrieved_ids, retrieved_before)
+    await turns.finish(turn_id, result.status, citations, result.steps)
+    return ChatResponse(
+        reply=result.reply, turn_id=turn_id, citations=citations, steps=result.steps
+    )

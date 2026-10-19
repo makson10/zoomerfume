@@ -8,10 +8,13 @@ from typing import Literal
 from fastapi import APIRouter, status
 from pydantic import BaseModel, ConfigDict
 
-from app.api.deps import Conversations, CurrentUser
+from app.agent.citations import Citations
+from app.agent.context import Step
+from app.api.deps import Conversations, CurrentUser, Turns
 from app.api.errors import ApiError
-from app.db.models import Conversation, User
+from app.db.models import Conversation, Message, User
 from app.services.conversations import ConversationStore
+from app.services.turns import TurnStore
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -26,13 +29,19 @@ class ConversationOut(BaseModel):
 
 
 class MessageOut(BaseModel):
-    """One logged message of a conversation's transcript."""
+    """One logged message of a conversation's transcript.
+
+    Zoomer's replies also carry their checked citations and the tool calls behind them.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     role: Literal["user", "assistant"]
     content: str
+    turn_id: uuid.UUID | None
+    citations: Citations | None = None
+    steps: list[Step] = []
 
 
 async def require_conversation(
@@ -67,9 +76,19 @@ async def create_conversation(user: CurrentUser, conversations: Conversations) -
     return ConversationOut.model_validate(await conversations.create(user.id))
 
 
+async def _message_out(turns: TurnStore, message: Message) -> MessageOut:
+    out = MessageOut.model_validate(message)
+    if message.role == "assistant" and message.turn_id is not None:
+        turn = await turns.get(message.turn_id)
+        if turn is not None and turn.citations is not None:
+            out.citations = Citations.model_validate(turn.citations)
+        out.steps = [Step.model_validate(step) for step in await turns.steps(message.turn_id)]
+    return out
+
+
 @router.get("/{conversation_id}/messages")
 async def list_messages(
-    conversation_id: uuid.UUID, user: CurrentUser, conversations: Conversations
+    conversation_id: uuid.UUID, user: CurrentUser, conversations: Conversations, turns: Turns
 ) -> list[MessageOut]:
     """Return the conversation's transcript, oldest first.
 
@@ -78,6 +97,6 @@ async def list_messages(
     """
     conversation = await require_conversation(conversations, conversation_id, user)
     return [
-        MessageOut.model_validate(message)
+        await _message_out(turns, message)
         for message in await conversations.messages(conversation.id)
     ]

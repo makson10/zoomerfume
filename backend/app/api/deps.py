@@ -15,6 +15,7 @@ from app.db.models import User
 from app.services.auth import UserStore, session_user_id
 from app.services.conversations import ConversationStore
 from app.services.rate_limit import RateLimiter
+from app.services.turns import TurnStore
 
 
 def get_turn_runner(request: Request) -> TurnRunner:
@@ -45,9 +46,14 @@ def get_rate_limiter(db: Annotated[AsyncSession, Depends(get_db)]) -> RateLimite
     return RateLimiter(db)
 
 
+def get_turn_store(db: Annotated[AsyncSession, Depends(get_db)]) -> TurnStore:
+    return TurnStore(db)
+
+
 AppSettings = Annotated[Settings, Depends(get_app_settings)]
 Conversations = Annotated[ConversationStore, Depends(get_conversation_store)]
 Limiter = Annotated[RateLimiter, Depends(get_rate_limiter)]
+Turns = Annotated[TurnStore, Depends(get_turn_store)]
 Users = Annotated[UserStore, Depends(get_user_store)]
 
 
