@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -40,8 +42,14 @@ class Settings(BaseSettings):
     # same-day session. 0 disables the age cap.
     history_retention_days: int = 4
 
-    # ── Qdrant ────────────────────────────────────────────────────────────
+    # ── Knowledge base ────────────────────────────────────────────────────
     qdrant_url: str = "http://qdrant:6333"
+    # Qdrant collection that holds the embedded corpus chunks.
+    qdrant_collection: str = "kb_chunks"
+    # Folder with the KB-*.md records, relative to the working directory.
+    corpus_dir: Path = Path("corpus")
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
 
     # ── Database (Postgres) ───────────────────────────────────────────────
     # The async SQLAlchemy DSN. Default targets the compose `postgres` service;
