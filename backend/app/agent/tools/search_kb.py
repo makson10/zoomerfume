@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Annotated
 
 from agents import RunContextWrapper, function_tool
+from pydantic import Field
 
 from app.agent.context import TurnContext
 from app.agent.tools.envelope import ErrorCode, ToolError, ToolResult, tool_guard
@@ -18,7 +20,7 @@ MAX_K = 8
 async def search_kb(
     ctx: RunContextWrapper[TurnContext],
     query: str,
-    k: int = 5,
+    k: Annotated[int, Field(ge=1, le=MAX_K)] = 5,
     record_type: RecordType | None = None,
     max_price: int | None = None,
 ) -> ToolResult:
@@ -33,7 +35,6 @@ async def search_kb(
     """
     if not query.strip():
         raise ToolError(ErrorCode.INVALID_ARGUMENT, "The query is empty.")
-    k = min(max(k, 1), MAX_K)
     hits = await ctx.context.kb.search(query, k, record_type, max_price)
     return ToolResult(
         data={"hits": [{**asdict(hit), "score": round(hit.score, 3)} for hit in hits]},

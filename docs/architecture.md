@@ -34,7 +34,7 @@ Both tools take the run context as their first argument and reach the knowledge 
 
 ## Strict schemas
 
-The SDK builds each tool's JSON schema from its signature and docstring, in strict mode: every property is required (optional ones are nullable) and `additionalProperties` is `false`, so the model's arguments always match the schema. `GET /api/tools/schema` returns the schemas straight from the tool objects, and the **Tools** button in the web chat shows them.
+The SDK builds each tool's JSON schema from its signature and docstring, in strict mode: every property is required (optional ones are nullable) and `additionalProperties` is `false`, so the model's arguments always match the schema, down to the 1–8 range of `k`. `GET /api/tools/schema` returns the schemas straight from the tool objects, and the **Tools** button in the web chat shows them.
 
 ## The error envelope
 

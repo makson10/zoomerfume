@@ -41,17 +41,17 @@ async def test_search_kb_returns_hits_and_records_the_step(
     fake_kb.hits = [make_hit("KB-012", 0.91234), make_hit("KB-012"), make_hit("KB-031")]
 
     result = await call_tool(
-        search_kb, ctx, query="vanilla", k=50, record_type="product", max_price=3000
+        search_kb, ctx, query="vanilla", k=3, record_type="product", max_price=3000
     )
 
     assert result["success"] is True
     hits = result["data"]["hits"]
     assert [hit["record_id"] for hit in hits] == ["KB-012", "KB-012", "KB-031"]
     assert hits[0]["score"] == 0.912
-    assert fake_kb.searches == [("vanilla", 8, "product", 3000)]
+    assert fake_kb.searches == [("vanilla", 3, "product", 3000)]
     [step] = ctx.steps
     assert step.tool == "search_kb"
-    assert step.args == {"query": "vanilla", "k": 50, "record_type": "product", "max_price": 3000}
+    assert step.args == {"query": "vanilla", "k": 3, "record_type": "product", "max_price": 3000}
     assert step.success is True
     assert step.record_ids == ["KB-012", "KB-031"]
 
@@ -110,4 +110,6 @@ def test_schema_endpoint_lists_both_tools_with_strict_schemas(
     for schema in schemas:
         assert schema["strict"] is True
         assert schema["parameters"]["additionalProperties"] is False
+    k = schemas[0]["parameters"]["properties"]["k"]
+    assert (k["minimum"], k["maximum"]) == (1, 8)
     assert list(schemas[1]["parameters"]["properties"]) == ["record_id"]
