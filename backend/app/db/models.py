@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -92,3 +93,25 @@ class RateLimit(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
     count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class KbRecord(Base):
+    """One knowledge base record, as the last ingest read it from the corpus."""
+
+    __tablename__ = "kb_records"
+
+    # "KB-001"
+    id: Mapped[str] = mapped_column(String(8), primary_key=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    # "product" | "policy" | "company" | "faq" | "news"
+    type: Mapped[str] = mapped_column(String(16), nullable=False)
+    # The corpus file name, e.g. "KB-001.md".
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated: Mapped[date] = mapped_column(Date, nullable=False)
+    header: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    # sha256 of the file. Ingest skips a record whose hash hasn't changed.
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
