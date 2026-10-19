@@ -2,12 +2,12 @@
 
 **Zoomer** is the AI shop assistant of **Zoomerfume**, a fictional Ukrainian online perfume shop. It recommends perfumes by taste, budget, occasion and season, compares products, answers shop questions (delivery, returns, payment, loyalty) and gives general perfume advice. The goal is a *grounded* assistant: answers about the shop come from a knowledge base the model searches through tools, with citations to the records it used, not from the model's memory.
 
-> **Status: early version.** The current version is a web chat with Zoomer on top of a non-streaming chat API, with no tools yet. Customers sign in with a phone number and keep several conversations each. Zoomer can talk about perfume in general, but it can't look up Zoomerfume's catalog, prices or policies, and it says so.
+> **Status: early version.** The current version is a web chat with Zoomer on top of a non-streaming chat API, with no tools yet. Customers sign in with a phone number and keep several conversations each. The knowledge base (96 records: products, policies, FAQ, company pages, news) is loaded into Qdrant and can be searched from the command line, but Zoomer doesn't use it yet: it can talk about perfume in general, but it can't look up Zoomerfume's catalog, prices or policies, and it says so.
 
 ## Stack
 
 - **Backend:** Python 3.12, FastAPI, [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/), pydantic-settings, structlog, uv
-- **Models:** `gpt-6-luna` for chat (configurable); `text-embedding-3-small` for the knowledge base (planned)
+- **Models:** `gpt-6-luna` for chat (configurable); `text-embedding-3-small` for the knowledge base
 - **Data:** Postgres (async SQLAlchemy + Alembic), Qdrant (vector search)
 - **Runtime:** Docker Compose; Kubernetes (kind) planned
 - **Frontend:** React + TypeScript + Vite + Mantine, served by the same FastAPI app
@@ -22,7 +22,7 @@ api (FastAPI + Agents SDK) ─────► OpenAI (chat + embeddings)
    │        │
    │        └───────────────────► Qdrant (knowledge-base vectors)
    ▼
-Postgres (users, conversations, message log, rate limits; later notes, costs)
+Postgres (users, conversations, message log, rate limits, knowledge base records; later notes, costs)
 ```
 
 One Docker image runs the API and serves the built web chat. Postgres and Qdrant run as separate services.
@@ -60,6 +60,28 @@ curl -b jar -X POST localhost:8000/api/chat \
 
 Send another message with the same `conversation_id` to continue the conversation. Health check: `curl localhost:8000/health`.
 
+## Load the knowledge base
+
+The knowledge base lives in `backend/corpus/`: one Markdown file per record. Load it into Qdrant (and the `kb_records` table) once the stack is up:
+
+```bash
+docker compose run --rm api python -m app.kb.ingest
+# Records: 96 total, 96 changed, 0 skipped, 0 deleted
+# Chunks: 206 embedded, 77,554 tokens
+# Qdrant kb_chunks: 206 points, 206 indexed vectors (HNSW)
+```
+
+Run it again after editing the corpus. Unchanged records are skipped, so a re-run only embeds what changed; `--force` re-embeds everything and `--dry-run` shows what would change. A full load costs well under one cent.
+
+Search it and check retrieval quality:
+
+```bash
+docker compose run --rm api python -m app.kb.search "something warm for winter" --type product --max-price 3000
+docker compose run --rm api python -m app.kb.eval_rephrase    # hit@1 / hit@5 on rephrased questions
+```
+
+How chunking, the HNSW index and the rephrase check work, with results: [docs/retrieval.md](docs/retrieval.md).
+
 ## Local development (without Docker for the API)
 
 Requirements: [uv](https://docs.astral.sh/uv/). It installs Python 3.12 itself.
@@ -86,6 +108,7 @@ Lint, format and tests:
 uv run ruff check .
 uv run ruff format .
 uv run pytest        # unit tests; no running services or API key needed
+uv run python -m app.kb.check_corpus   # corpus consistency checks
 ```
 
 The web chat runs on the Vite dev server with hot reload. It needs Node.js (CI and the Docker image use 22) and the API on port 8000, from Compose or uvicorn:
@@ -113,6 +136,9 @@ All settings come from environment variables (`.env` for local runs). See `.env.
 | `HISTORY_WINDOW_TURNS` | `12` | How many recent user turns the model sees |
 | `DATABASE_URL` | local Compose DSN | Postgres connection (asyncpg) |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant connection |
+| `QDRANT_COLLECTION` | `kb_chunks` | Qdrant collection for the knowledge base |
+| `CORPUS_DIR` | `corpus` | Folder with the knowledge base records |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | Model that embeds the knowledge base and search queries |
 | `MESSAGE_LOG_ENABLED` | `true` | Write every exchange to the `messages` table; the web chat loads transcripts from it |
 | `SESSION_SECRET` | (required) | Signs the session cookie, at least 32 characters |
 | `PHONE_DEFAULT_REGION` | `UA` | Region for phone numbers typed without a country code |
@@ -129,9 +155,12 @@ zoomerfume/
 │   │   ├── agent/        Zoomer: agent runtime, prompt, per-turn context
 │   │   ├── core/         settings, logging, input validation
 │   │   ├── db/           SQLAlchemy engine, models, message log
+│   │   ├── kb/           knowledge base: parsing, chunking, ingest, search, checks
 │   │   ├── middleware/   request logging context
 │   │   └── services/     OpenAI and Qdrant clients, users, conversations, rate limits
 │   ├── alembic/          database migrations
+│   ├── corpus/           knowledge base records (KB-001.md …)
+│   ├── eval/             rephrased questions for the retrieval check
 │   ├── scripts/          container entrypoint
 │   ├── tests/            pytest unit tests
 │   └── pyproject.toml    uv project (Python 3.12)
@@ -139,6 +168,7 @@ zoomerfume/
 │   ├── src/              React app: pages, components, hooks, API client, theme
 │   ├── public/           logo
 │   └── package.json      npm project
+├── docs/retrieval.md             chunking, HNSW and retrieval results
 ├── .github/workflows/ci.yml      CI pipeline
 ├── Dockerfile
 ├── docker-compose.yml            api + postgres + qdrant
@@ -148,4 +178,4 @@ zoomerfume/
 
 ## Disclaimer
 
-Zoomerfume is a **fictional shop** made for this project. Perfume names refer to real products, but all shop data (prices, stock, policies, contacts) is invented. The project is not affiliated with any brand or retailer. Zoomer is an AI assistant and can make mistakes.
+Zoomerfume is a **fictional shop** made for this project. Perfume names refer to real products, and brand names belong to their owners, but all shop data (prices, stock, policies, contacts) is invented. The project is not affiliated with any brand or retailer. Zoomer is an AI assistant and can make mistakes.

@@ -14,8 +14,9 @@ from app.kb.corpus import Record
 # HNSW graph: 16 links per node, 100 candidates considered while building it.
 HNSW_CONFIG = models.HnswConfigDiff(m=16, ef_construct=100)
 # Qdrant builds the HNSW graph only for segments bigger than this many kilobytes of vectors
-# and searches smaller ones by brute force. The default (20,000 kB) is bigger than our whole
-# corpus; one 1536-dimension vector is about 6 kB, so 10 kB indexes any real segment.
+# and searches smaller ones by brute force. The server default (10,000 kB in Qdrant 1.19) is
+# bigger than our whole corpus; one 1536-dimension vector is about 6 kB, so 10 kB indexes
+# any real segment.
 INDEXING_THRESHOLD_KB = 10
 PAYLOAD_INDEXES = {
     "record_id": models.PayloadSchemaType.KEYWORD,

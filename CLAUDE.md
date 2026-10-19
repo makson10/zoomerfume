@@ -6,7 +6,7 @@ This file gives Claude Code the project context and operating rules for the Zoom
 
 Zoomerfume is a fictional Ukrainian online perfume shop (prices in UAH). This repository is its AI shop assistant, **Zoomer**: a chat bot that recommends perfumes, compares products, answers shop questions and gives general perfume advice. The goal is a *grounded* assistant: answers about the shop must come from a knowledge base the model searches through tools, with citations, never from the model's memory.
 
-Current state: a web chat with Zoomer on top of a non-streaming chat API, with no tools yet. Customers sign in with a phone number and keep several conversations each. Zoomer can talk about perfume in general but can't look up the shop's catalog, prices or policies, and says so.
+Current state: a web chat with Zoomer on top of a non-streaming chat API, with no tools yet. Customers sign in with a phone number and keep several conversations each. The knowledge base (`backend/corpus/`, 96 records) is chunked, embedded and stored in Qdrant by a command-line ingest, and can be searched from the command line. Zoomer doesn't use it yet: it can talk about perfume in general but can't look up the shop's catalog, prices or policies, and says so.
 
 The repository root is a single git repo. Backend code lives in `backend/` and the web chat in `frontend/`; Docker files, `.env.example` and docs live at the root.
 
@@ -25,9 +25,11 @@ browser ── POST /api/chat ────────────► api (FastA
 
 app startup:        ping Postgres + Qdrant (a failure is logged, never fatal)
 container startup:  alembic upgrade head, then uvicorn
+one-off ingest:     python -m app.kb.ingest ──► corpus/KB-*.md ──► chunks ──► OpenAI embeddings
+                                                 ──► Qdrant kb_chunks + Postgres kb_records
 ```
 
-Qdrant is wired in (client, startup ping, Compose service) but nothing reads or writes collections yet.
+The API pings Qdrant at startup but doesn't search it yet. Only the `app.kb` command-line tools read and write the `kb_chunks` collection.
 
 ## Repository Layout
 
@@ -36,9 +38,12 @@ Qdrant is wired in (client, startup ping, Compose service) but nothing reads or 
   - `agent/`: Zoomer's runtime, system prompt and per-turn context
   - `core/`: settings, logging setup, phone and name validation (`validators.py`)
   - `db/`: SQLAlchemy engine, models, fail-open write guard, message log
+  - `kb/`: the knowledge base: record parsing (`corpus.py`), chunking (`chunking.py`), embeddings, Qdrant storage (`store.py`), the `kb_records` table (`records.py`), and the command-line tools `ingest`, `search`, `check_corpus` and `eval_rephrase`
   - `middleware/`: per-request logging context
   - `services/`: OpenAI and Qdrant client constructors, users and the session cookie (`auth.py`), conversations (`conversations.py`), rate limits (`rate_limit.py`)
 - `backend/alembic/`: database migrations (`versions/0001_messages.py`, ...)
+- `backend/corpus/`: the knowledge base, one Markdown record per file (`KB-001.md` …)
+- `backend/eval/`: `rephrase.yaml`, rephrased questions for the retrieval check
 - `backend/tests/`: pytest unit tests and test fakes
 - `backend/scripts/entrypoint.sh`: container entrypoint
 - `backend/pyproject.toml`, `backend/uv.lock`: the uv project (Python 3.12)
@@ -50,6 +55,7 @@ Qdrant is wired in (client, startup ping, Compose service) but nothing reads or 
   - `src/theme.ts`: the Mantine theme
   - `public/logo.svg`: the logo, also used as the favicon
 - `.github/workflows/ci.yml`: the CI workflow
+- `docs/retrieval.md`: chunking, the HNSW index and the rephrase check results
 - Root: `Dockerfile`, `docker-compose.yml`, `docker-compose.override.yml`, `.env.example`, `README.md`
 
 ## Entry Points
@@ -69,6 +75,11 @@ Qdrant is wired in (client, startup ping, Compose service) but nothing reads or 
   - `GET /openapi.json` is served in every mode, so API types can be generated from it
   - `/docs` and `/redoc` only when `DEBUG=true`
 - Web chat: `GET /` and the files next to it (`/assets/*`, `/logo.svg`), when the image has a frontend build. Any other path gets FastAPI's JSON 404.
+- Command-line tools, run from `backend/` or in the image's `/app`:
+  - `python -m app.kb.ingest [--force] [--dry-run]`: load the corpus into Qdrant and `kb_records`
+  - `python -m app.kb.search "query" [-k 5] [--type product] [--max-price 3000]`: search the knowledge base
+  - `python -m app.kb.check_corpus [corpus_dir]`: consistency checks, no services or settings needed
+  - `python -m app.kb.eval_rephrase [--file eval/rephrase.yaml] [-k 5]`: hit@1 and hit@k for rephrased questions
 
 ## Current Stack
 
@@ -76,7 +87,7 @@ Qdrant is wired in (client, startup ping, Compose service) but nothing reads or 
 - Web: FastAPI + uvicorn, pydantic v2, pydantic-settings.
 - LLM: OpenAI Agents SDK (`openai-agents`) on the OpenAI Responses API. Chat model `gpt-6-luna`, which rejects `temperature`, so the agent uses low reasoning effort instead.
 - Persistence: Postgres 17 through async SQLAlchemy 2 + asyncpg. Alembic migrations are hand-written. Agent conversation history lives in a SQLite file.
-- Vector store: Qdrant (server and `qdrant-client`, both v1.19).
+- Vector store: Qdrant (server and `qdrant-client`, both v1.19). Embeddings: `text-embedding-3-small`, 1536 dimensions. Chunk sizes are counted with `tiktoken` (`cl100k_base`). Record headers are YAML, read with PyYAML.
 - Logging: structlog on top of stdlib `logging`. JSON lines by default, colored console output when `DEBUG=true`.
 - Frontend: npm (CI and the Docker image use Node.js 22), Vite 8, React 19, TypeScript 6.0, Mantine 9, `react-markdown` with `remark-gfm`, Tabler icons.
 - Lint/format: ruff for the backend (line length 100, rules `E`, `F`, `I`, `UP`); oxlint and Prettier for the frontend (no semicolons, single quotes).
@@ -111,6 +122,8 @@ A chat turn goes through these steps:
 
 **Dependencies.** Code gets settings and clients passed in; no module reads settings at import time. Routes get lifespan objects through FastAPI dependencies in `app/api/deps.py`, which read `app.state`. Add a new dependency there when a route first needs a new shared object.
 
+**Knowledge base.** Records are `KB-NNN.md` files with a YAML header (`id`, `title`, `type`, `updated`; products also have brand, concentration, family, gender, seasons, sizes with prices and points, an optional decant and availability) and a Markdown body in `##` sections. `RecordHeader` (`app/kb/corpus.py`) validates the header, and the file name must match the id. Records link to each other as plain IDs ("see KB-052"), never in square brackets, which is Zoomer's citation format. `chunk_record()` splits a body at `##` headings, packs neighbouring sections up to 500 tokens, splits an oversized section on paragraphs and then sentences, starts every chunk after the first with the last ~75 tokens of the previous one, and gives each chunk a `Title › Sections` breadcrumb that is embedded with it. Ingest skips records whose file hash matches `kb_records.content_hash`, embeds the rest in batches, upserts points with id `uuid5(record id, chunk index)` and deletes leftover chunks, then deletes records that left the corpus. A newly created collection makes it a full run. The collection uses cosine distance, HNSW `m=16`, `ef_construct=100` and `indexing_threshold=10` kB, because Qdrant's default threshold (10,000 kB) is bigger than the whole corpus and would leave it unindexed; ingest waits for the index and prints `indexed_vectors_count`. The payload has `source`, `title`, `chunk_index`, `record_id`, `type`, `updated`, `section`, `text` and, for products, `price` (the cheapest bottle), with payload indexes on `record_id`, `type` and `price`. `search()` (`app/kb/search.py`) embeds the query and filters by `type` and `max_price`. Postgres commits the new hashes only after Qdrant has the points, so a failed run is simply repeated.
+
 **Migrations.** The container entrypoint runs `alembic upgrade head` before it starts uvicorn. `alembic/env.py` reads the DSN from the app settings, so the database URL is defined in exactly one place.
 
 **Web chat.** A single page with no router and no state library. On load, `useSession` calls `/api/me`; a 401 shows `SignInFlow`, where Zoomer asks for the phone and then the name as chat bubbles. Zoomer's first question is in the frontend, and every later line comes from the API's `message`. When signed in, `ChatPage` remounts per user. `useChat` loads the conversation list, opens the most recent conversation with its transcript, and keeps the rest in React state. "New chat" only clears the view: the first message creates the conversation, so the list never fills with empty chats. Sending and switching chats are blocked while a request is pending. API errors with a code show their `message` (a rate limit, for example); other failures show a generic line. All requests go through `src/api/client.ts`. Assistant replies render as Markdown (GFM tables included, raw HTML is not rendered); user messages render as plain text. The color scheme follows the system, and the header toggle overrides it. Keep the UI minimal and functional: stock Mantine components and the theme in `theme.ts`. In development the Vite dev server proxies `/api` to `localhost:8000`, so the browser never needs CORS. In the image, the first Docker stage builds the frontend and the runtime stage copies `frontend/dist` to `/app/static`.
@@ -124,6 +137,7 @@ Unit tests live in `backend/tests/` and run with pytest (`asyncio_mode = "auto"`
 - The fakes don't run SQL. The upserts in `UserStore` and `RateLimiter` are checked against a real database in the smoke checks.
 - Runtime tests replace `Runner.run` and run in a temporary directory, so no SQLite file is created in `backend/`.
 - Web chat tests mount a tiny fake build from a temporary directory.
+- Knowledge base tests cover header parsing, the corpus checks (including a run over the shipped `backend/corpus/`), chunk limits, overlap and breadcrumbs, point ids and search filters. `tiktoken` downloads the `cl100k_base` encoding on first use and caches it, so the first chunking test needs network access.
 
 Keep tests few and focused: the happy path plus the errors that matter. Replace external services with fakes at the boundary instead of starting them. The frontend has no test suite; it is checked by lint, formatting and the type-checked build.
 
@@ -137,6 +151,7 @@ The app reads environment variables only, through `app/core/config.py`. For loca
 - `SESSION_SECRET` is required and must be at least 32 characters (`openssl rand -hex 32`). Changing it signs everyone out.
 - Compose passes the root `.env` into the `api` container (`env_file`). Postgres credentials also have defaults in `docker-compose.yml`.
 - Inside Compose, services reach each other by service name (`postgres`, `qdrant`). A backend run on the host must point `DATABASE_URL` and `QDRANT_URL` at `localhost` (see Common Commands).
+- The knowledge base settings are `QDRANT_COLLECTION` (`kb_chunks`), `CORPUS_DIR` (`corpus`, relative to the working directory: `backend/` on the host, `/app` in the image), `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS`. Changing the model or dimensions needs a new collection.
 - After editing `.env`, recreate the container with `docker compose up -d api`. `docker compose restart` reuses the old container config and does not re-read `.env`.
 
 The frontend has no configuration of its own. It calls the API on the same origin.
@@ -173,6 +188,16 @@ docker compose exec postgres psql -U zoomer -d zoomerfume \
   -c 'select role, left(content, 60), created_at from messages order by id desc limit 4'
 ```
 
+Knowledge base (needs the stack up; ingest and search call the OpenAI embeddings API, a full ingest costs well under a cent):
+
+```bash
+docker compose run --rm api python -m app.kb.ingest            # second run: everything skipped
+docker compose run --rm api python -m app.kb.search "vanilla and tobacco" --type product --max-price 3000
+docker compose run --rm api python -m app.kb.eval_rephrase     # target: hit@5 ≥ 90%
+curl -s localhost:6333/collections/kb_chunks                   # points_count, indexed_vectors_count
+docker compose exec postgres psql -U zoomer -d zoomerfume -c 'select id, type, title from kb_records limit 5'
+```
+
 To check the chat rate limit without 20 model calls, run the `api` service with a lower `RATE_LIMIT_CHAT_PER_MIN` (an extra Compose file with `environment:` works, since `.env` is passed through `env_file`). Sign-in limits cost nothing to check: 11 invalid `/api/auth/phone` calls in one minute get a 429.
 
 Backend on the host, with Postgres and Qdrant in Docker:
@@ -193,6 +218,7 @@ Lint, format, tests, dependencies and migrations:
 uv run ruff check .
 uv run ruff format .
 uv run pytest
+uv run python -m app.kb.check_corpus
 uv add <package>                   # updates pyproject.toml and uv.lock
 uv add --dev <package>
 uv run alembic revision -m "<description>" --rev-id 0002   # then hand-write the body
@@ -226,3 +252,6 @@ If the user asks Claude to run the project, the API or the full stack, Claude sh
 - TypeScript stays on 6.0, the version the Vite template pins.
 - The production build warns that the JS bundle is over 500 kB (Mantine, Markdown and icons). It is a single local page, so there is no code splitting yet.
 - Every chat check calls OpenAI and costs a little. Keep manual checks short.
+- After changing the chunking or the embedding model, run ingest with `--force`: the file hashes haven't changed, so a normal run would skip every record.
+- Right after records are deleted or shortened, `indexed_vectors_count` can be slightly higher than `points_count` until Qdrant cleans up the segment. On a fresh full ingest the two are equal.
+- `.dockerignore` excludes only the repo docs (`README.md`, `CLAUDE.md`, `docs/`). The corpus is Markdown, so a broader `*.md` rule would ship an image with no records.
