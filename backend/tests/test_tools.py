@@ -7,10 +7,11 @@ from typing import Any
 import pytest
 from agents import FunctionTool
 from agents.tool_context import ToolContext
+from fastapi.testclient import TestClient
 
 from app.agent.context import TurnContext
 from app.agent.tools import open_record, search_kb
-from app.db.models import KbRecord
+from app.db.models import KbRecord, User
 from tests.fakes import FakeKnowledgeBase, make_hit
 
 
@@ -97,3 +98,15 @@ async def test_tool_exceptions_become_an_upstream_error(
     assert result["success"] is False
     assert result["code"] == "UPSTREAM_ERROR"
     assert (ctx.steps[0].success, ctx.steps[0].record_ids) == (False, [])
+
+
+def test_schema_endpoint_lists_both_tools_with_strict_schemas(
+    client: TestClient, user: User
+) -> None:
+    schemas = client.get("/api/tools/schema").json()
+
+    assert [schema["name"] for schema in schemas] == ["search_kb", "open_record"]
+    for schema in schemas:
+        assert schema["strict"] is True
+        assert schema["parameters"]["additionalProperties"] is False
+    assert list(schemas[1]["parameters"]["properties"]) == ["record_id"]

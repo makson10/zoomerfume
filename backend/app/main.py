@@ -24,7 +24,9 @@ from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
 from app.api.errors import ApiError, api_error_handler
 from app.api.health import router as health_router
+from app.api.records import router as records_router
 from app.api.spa import mount_web_chat
+from app.api.tools import router as tools_router
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.db.engine import create_db_engine, ping_db
@@ -64,6 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     set_default_openai_client(openai_client)
     kb = KnowledgeBase(settings, qdrant_client, openai_client, sessionmaker)
     app.state.sessionmaker = sessionmaker
+    app.state.kb = kb
     app.state.turn_runner = TurnRunner(settings, engine, kb)
 
     # 1. Verify Postgres connectivity. Users and conversations live there, so
@@ -159,5 +162,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(conversations_router)
     app.include_router(chat_router)
+    app.include_router(records_router)
+    app.include_router(tools_router)
     mount_web_chat(app)
     return app
