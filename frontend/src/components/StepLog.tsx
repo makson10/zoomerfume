@@ -66,8 +66,6 @@ export function StepLog({ steps, citations }: StepLogProps) {
     )
   }
 
-  const seconds =
-    steps.reduce((total, step) => total + step.duration_ms, 0) / 1000
   const Chevron = opened ? IconChevronDown : IconChevronRight
 
   return (
@@ -79,8 +77,7 @@ export function StepLog({ steps, citations }: StepLogProps) {
         leftSection={<Chevron size={14} />}
         onClick={toggle}
       >
-        {steps.length === 1 ? '1 tool call' : `${steps.length} tool calls`} ·{' '}
-        {seconds.toFixed(1)} s
+        {steps.length === 1 ? '1 tool call' : `${steps.length} tool calls`}
       </Button>
       <Collapse expanded={opened}>
         <Stack gap={4} pl="md">
