@@ -6,6 +6,7 @@ import uuid
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.agent.citations import Citations
 from app.agent.context import Step, TurnStatus
@@ -47,12 +48,11 @@ class TurnStore:
         )
         return set(result)
 
-    async def get(self, turn_id: uuid.UUID) -> Turn | None:
-        return await self._session.get(Turn, turn_id)
-
-    async def steps(self, turn_id: uuid.UUID) -> list[ToolStep]:
-        """Return the turn's tool steps in order."""
+    async def for_conversation(self, conversation_id: uuid.UUID) -> list[Turn]:
+        """Return the conversation's turns with their tool steps, in two queries."""
         result = await self._session.scalars(
-            select(ToolStep).where(ToolStep.turn_id == turn_id).order_by(ToolStep.step)
+            select(Turn)
+            .where(Turn.conversation_id == conversation_id)
+            .options(selectinload(Turn.steps))
         )
         return list(result)

@@ -151,7 +151,6 @@ class FakeTurnStore:
 
     def __init__(self) -> None:
         self.turns: dict[uuid.UUID, Turn] = {}
-        self.tool_steps: dict[uuid.UUID, list[ToolStep]] = {}
 
     def add(
         self, conversation_id: uuid.UUID, citations: Citations | None, steps: list[Step]
@@ -166,9 +165,7 @@ class FakeTurnStore:
     ) -> None:
         turn.status = status
         turn.citations = citations.model_dump() if citations else None
-        self.tool_steps[turn.id] = [
-            ToolStep(turn_id=turn.id, **step.model_dump()) for step in steps
-        ]
+        turn.steps = [ToolStep(turn_id=turn.id, **step.model_dump()) for step in steps]
 
     async def start(self, conversation_id: uuid.UUID) -> uuid.UUID:
         turn = Turn(id=uuid.uuid4(), conversation_id=conversation_id, status="running")
@@ -185,12 +182,9 @@ class FakeTurnStore:
             record_id
             for turn in self.turns.values()
             if turn.conversation_id == conversation_id
-            for step in self.tool_steps.get(turn.id, [])
+            for step in turn.steps
             for record_id in step.record_ids
         }
 
-    async def get(self, turn_id: uuid.UUID) -> Turn | None:
-        return self.turns.get(turn_id)
-
-    async def steps(self, turn_id: uuid.UUID) -> list[ToolStep]:
-        return self.tool_steps.get(turn_id, [])
+    async def for_conversation(self, conversation_id: uuid.UUID) -> list[Turn]:
+        return [turn for turn in self.turns.values() if turn.conversation_id == conversation_id]

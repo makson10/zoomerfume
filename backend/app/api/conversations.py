@@ -12,9 +12,8 @@ from app.agent.citations import Citations
 from app.agent.context import Step
 from app.api.deps import Conversations, CurrentUser, Turns
 from app.api.errors import ApiError
-from app.db.models import Conversation, Message, User
+from app.db.models import Conversation, Message, Turn, User
 from app.services.conversations import ConversationStore
-from app.services.turns import TurnStore
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -76,13 +75,12 @@ async def create_conversation(user: CurrentUser, conversations: Conversations) -
     return ConversationOut.model_validate(await conversations.create(user.id))
 
 
-async def _message_out(turns: TurnStore, message: Message) -> MessageOut:
+def _message_out(message: Message, turn: Turn | None) -> MessageOut:
     out = MessageOut.model_validate(message)
-    if message.role == "assistant" and message.turn_id is not None:
-        turn = await turns.get(message.turn_id)
-        if turn is not None and turn.citations is not None:
+    if message.role == "assistant" and turn is not None:
+        if turn.citations is not None:
             out.citations = Citations.model_validate(turn.citations)
-        out.steps = [Step.model_validate(step) for step in await turns.steps(message.turn_id)]
+        out.steps = [Step.model_validate(step) for step in turn.steps]
     return out
 
 
@@ -96,7 +94,8 @@ async def list_messages(
         ApiError: 404 when the conversation isn't the user's.
     """
     conversation = await require_conversation(conversations, conversation_id, user)
+    turns_by_id = {turn.id: turn for turn in await turns.for_conversation(conversation.id)}
     return [
-        await _message_out(turns, message)
+        _message_out(message, turns_by_id.get(message.turn_id))
         for message in await conversations.messages(conversation.id)
     ]
