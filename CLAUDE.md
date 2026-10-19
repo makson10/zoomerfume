@@ -253,5 +253,5 @@ If the user asks Claude to run the project, the API or the full stack, Claude sh
 - The production build warns that the JS bundle is over 500 kB (Mantine, Markdown and icons). It is a single local page, so there is no code splitting yet.
 - Every chat check calls OpenAI and costs a little. Keep manual checks short.
 - After changing the chunking or the embedding model, run ingest with `--force`: the file hashes haven't changed, so a normal run would skip every record.
-- Right after records are deleted or shortened, `indexed_vectors_count` can be slightly higher than `points_count` until Qdrant cleans up the segment. On a fresh full ingest the two are equal.
+- `indexed_vectors_count` equals `points_count` only on a fresh collection. After any re-embed or delete it stays higher, because Qdrant vacuums only segments with at least 1,000 vectors. Search is not affected.
 - `.dockerignore` excludes only the repo docs (`README.md`, `CLAUDE.md`, `docs/`). The corpus is Markdown, so a broader `*.md` rule would ship an image with no records.

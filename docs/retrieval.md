@@ -76,7 +76,7 @@ The proof is `indexed_vectors_count` in the collection info. We loaded the same 
 curl -s localhost:6333/collections/kb_chunks | jq '.result | {status, points_count, indexed_vectors_count}'
 ```
 
-The ingest command waits until Qdrant has finished building the index and prints both numbers. Right after records are deleted or shortened, `indexed_vectors_count` can be a little higher than `points_count`: deleted vectors stay in the index until Qdrant cleans up the segment.
+The ingest command waits until Qdrant has finished building the index and prints both numbers. On a fresh collection the two numbers are equal. After any re-embed or delete (`--force`, a changed or removed record), `indexed_vectors_count` is higher than `points_count` and stays that way: replaced and deleted vectors remain in the index, and Qdrant vacuums only segments with at least 1,000 vectors (`vacuum_min_vector_number`), more than this whole collection. A `--force` run gives 206 points and 285 indexed vectors, for example. Search is not affected, because deleted vectors are never returned.
 
 A filtered search that leaves only a few points, for example only products under 3,000 ₴, may be answered by checking those points exactly instead of walking the graph. Qdrant's query planner decides this, and for a corpus this small it's the faster path.
 
