@@ -82,16 +82,18 @@ async def ingest(
                 )
                 return summary
 
+            vectors, summary.tokens = await embed_texts(
+                openai,
+                [chunk.embed_text for _, chunks in chunked for chunk in chunks],
+                model=settings.embedding_model,
+                dimensions=settings.embedding_dimensions,
+            )
+            start = 0
             for record, chunks in chunked:
-                vectors, tokens = await embed_texts(
-                    openai,
-                    [chunk.embed_text for chunk in chunks],
-                    model=settings.embedding_model,
-                    dimensions=settings.embedding_dimensions,
-                )
-                summary.tokens += tokens
-                await replace_record_chunks(qdrant, collection, record, chunks, vectors)
+                end = start + len(chunks)
+                await replace_record_chunks(qdrant, collection, record, chunks, vectors[start:end])
                 await save_record(session, record)
+                start = end
             for record_id in removed:
                 await delete_record_chunks(qdrant, collection, record_id)
             await delete_records(session, removed)
