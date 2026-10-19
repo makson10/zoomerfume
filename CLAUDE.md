@@ -20,7 +20,7 @@ browser ── POST /api/chat ────────────► api (FastA
                                           │
                                           ├── session cookie ──► user, rate limit, conversation owner check
                                           ├── TurnRunner.run() ──► OpenAI Responses API (CHAT_MODEL)
-                                          ├── history ───────────► SQLite    data/agents/sessions.db
+                                          ├── history ───────────► Postgres  agent_sessions, agent_messages
                                           └── message log ───────► Postgres  messages table (fail-open)
 
 app startup:        ping Postgres + Qdrant (a failure is logged, never fatal)
@@ -86,7 +86,7 @@ The API pings Qdrant at startup but doesn't search it yet. Only the `app.kb` com
 - Runtime: Python 3.12, managed with uv. The Docker image installs from `uv.lock` with `uv sync --frozen`.
 - Web: FastAPI + uvicorn, pydantic v2, pydantic-settings.
 - LLM: OpenAI Agents SDK (`openai-agents`) on the OpenAI Responses API. Chat model `gpt-6-luna`, which rejects `temperature`, so the agent uses low reasoning effort instead.
-- Persistence: Postgres 17 through async SQLAlchemy 2 + asyncpg. Alembic migrations are hand-written. Agent conversation history lives in a SQLite file.
+- Persistence: Postgres 17 through async SQLAlchemy 2 + asyncpg. Alembic migrations are hand-written. Agent conversation history lives in Postgres too, through the Agents SDK's `SQLAlchemySession`.
 - Vector store: Qdrant (server and `qdrant-client`, both v1.19). Embeddings: `text-embedding-3-small`, 1536 dimensions. Chunk sizes are counted with `tiktoken` (`cl100k_base`). Record headers are YAML, read with PyYAML.
 - Logging: structlog on top of stdlib `logging`. JSON lines by default, colored console output when `DEBUG=true`.
 - Frontend: npm (CI and the Docker image use Node.js 22), Vite 8, React 19, TypeScript 6.0, Mantine 9, `react-markdown` with `remark-gfm`, Tabler icons.
@@ -101,11 +101,7 @@ A chat turn goes through these steps:
 2. Dependencies run first: `get_current_user` reads the user from the session cookie (401), and `limit_chat` counts the message against the user's rate limit (429). The route then loads the conversation only if it belongs to the user (404), titles it after its first message and moves it to the top of the list.
 3. The route gets the `TurnRunner` (`app/agent/runtime.py`) through the `get_turn_runner` dependency (`app/api/deps.py`). `TurnRunner.run()` builds a `TurnContext` and calls `Runner.run` with the runner's `Agent`.
 4. The agent's instructions are the static `AGENT_INSTRUCTIONS` (`app/agent/prompts.py`) plus the current date and time in UTC and the customer's name, recomputed on every run.
-5. History comes from `RetentionSQLiteSession` at `data/agents/sessions.db` (relative to the working directory), with the conversation id as the session id. The model input is capped two ways, and neither deletes stored rows:
-   - by age: `HISTORY_RETENTION_DAYS`, in `get_items()`
-   - by count: the last `HISTORY_WINDOW_TURNS` user turns, in `window_history()`
-
-   Both cut only on turn boundaries, so a tool call is never separated from its output.
+5. History comes from the SDK's `SQLAlchemySession` on the app's engine, with the conversation id as the session id. Its tables `agent_sessions` and `agent_messages` are created by migration `0004`, not by the SDK. The model sees only the last `HISTORY_WINDOW_TURNS` user turns (`window_history()`, the run's `session_input_callback`); stored rows are never deleted. The window cuts only on turn boundaries, so a tool call is never separated from its output.
 6. Every request carries `prompt_cache_key = conversation:<conversation_id>`, and the run is capped at `AGENT_MAX_TURNS` agent-loop iterations.
 7. Any runtime error, or an empty answer, becomes `FALLBACK_TEXT`, and the turn is marked `degraded`. The endpoint still answers 200.
 8. When `MESSAGE_LOG_ENABLED=true`, `record_turn_messages()` writes the user row and the assistant row to the `messages` table through `pg_guard`.
@@ -135,7 +131,7 @@ Unit tests live in `backend/tests/` and run with pytest (`asyncio_mode = "auto"`
 - `conftest.py` builds `Settings` in code with `_env_file=None`, so a real key in `.env` is never read.
 - The `client` fixture overrides `get_turn_runner`, `get_user_store`, `get_conversation_store` and `get_rate_limiter` with in-memory fakes from `tests/fakes.py`, and uses `TestClient` without `with`, so the lifespan never runs and nothing touches Postgres. The client keeps cookies, so the `user` fixture signs in through `/api/auth/phone` like a browser.
 - The fakes don't run SQL. The upserts in `UserStore` and `RateLimiter` are checked against a real database in the smoke checks.
-- Runtime tests replace `Runner.run` and run in a temporary directory, so no SQLite file is created in `backend/`.
+- Runtime tests replace `Runner.run`. The runner's engine is created but never connects.
 - Web chat tests mount a tiny fake build from a temporary directory.
 - Knowledge base tests cover header parsing, the corpus checks (including a run over the shipped `backend/corpus/`), chunk limits, overlap and breadcrumbs, point ids and search filters. `tiktoken` downloads the `cl100k_base` encoding on first use and caches it, so the first chunking test needs network access.
 
@@ -246,7 +242,7 @@ If the user asks Claude to run the project, the API or the full stack, Claude sh
 
 - Verify backend changes with `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest` and the smoke checks above. Verify frontend changes with `npm run lint`, `npm run format:check`, `npm run build` and a look at the page.
 - In `README.md` and `CLAUDE.md`, write each paragraph, list item and blockquote as one line. Don't hard-wrap prose at a fixed width; editors and GitHub wrap it. Code blocks, tables and the ASCII diagrams keep their own line breaks.
-- Agent history lives in the container filesystem (`/app/data/agents/sessions.db`), not on a volume. Recreating the `api` container (a rebuild, `docker compose down`) makes Zoomer forget every conversation, while the web chat still shows their transcripts from the `messages` table.
+- Agent history and transcripts both live in Postgres, so they survive a rebuilt or recreated `api` container. Only `docker compose down -v` (it deletes the `postgres_data` volume) makes Zoomer forget.
 - Localhost cookies are shared between ports, so the Vite dev server (`:5173`) and the API (`:8000`) share the `zoomerfume_session` cookie. The cookie has its own name so it doesn't clash with other local apps.
 - Two HTTP client libraries are installed: `openai` 3.x (and so the Agents SDK) uses `httpx2`/`httpcore2`, while `qdrant-client` uses `httpx` 0.28. Their loggers are quieted separately in `app/core/logging.py`. OpenAI failures surface as `openai.*` exceptions, not `httpx` ones.
 - TypeScript stays on 6.0, the version the Vite template pins.

@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 from agents import Runner
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.agent.runtime import FALLBACK_TEXT, TurnRunner, window_history
 from app.core.config import Settings
+from app.db.engine import create_db_engine
 
 
 def _user(text: str) -> dict[str, Any]:
@@ -61,14 +60,12 @@ def test_window_history_keeps_everything(turns: int) -> None:
 async def test_turn_runner_returns_the_reply_or_the_fallback(
     settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
     outcome: Any,
     expected: str,
 ) -> None:
-    monkeypatch.chdir(tmp_path)
     fake_run = AsyncMock(side_effect=[outcome])
     monkeypatch.setattr(Runner, "run", fake_run)
-    runner = TurnRunner(settings, async_sessionmaker())
+    runner = TurnRunner(settings, create_db_engine(settings))
 
     assert await runner.run(uuid.uuid4(), "Mary", "hi") == expected
     fake_run.assert_awaited_once()

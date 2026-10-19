@@ -35,12 +35,6 @@ class Settings(BaseSettings):
     # stay flat on long chats. A "turn" = one user input plus the model's
     # response. 0 disables windowing (the whole session is sent).
     history_window_turns: int = 12
-    # Conversation-history age cap. Each turn the agent is fed only turns whose
-    # start falls within the last N days; older turns are dropped from the *model
-    # input* only. Complements history_window_turns: the age cap forgets stale
-    # context when a user returns after days, the turn cap bounds a chatty
-    # same-day session. 0 disables the age cap.
-    history_retention_days: int = 4
 
     # ── Knowledge base ────────────────────────────────────────────────────
     qdrant_url: str = "http://qdrant:6333"

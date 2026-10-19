@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     set_default_openai_client(openai_client)
     app.state.sessionmaker = sessionmaker
-    app.state.turn_runner = TurnRunner(settings, sessionmaker)
+    app.state.turn_runner = TurnRunner(settings, engine)
 
     # 1. Verify Postgres connectivity. Users and conversations live there, so
     #    the API can't serve signed-in requests until it is reachable.
