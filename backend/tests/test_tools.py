@@ -91,12 +91,13 @@ async def test_open_record_fails_with_an_error_code(
 async def test_tool_exceptions_become_an_upstream_error(
     ctx: TurnContext, fake_kb: FakeKnowledgeBase
 ) -> None:
-    fake_kb.error = RuntimeError("Qdrant is down")
+    fake_kb.error = RuntimeError("connection refused: qdrant:6333")
 
     result = await call_tool(search_kb, ctx, query="vanilla")
 
     assert result["success"] is False
     assert result["code"] == "UPSTREAM_ERROR"
+    assert "qdrant:6333" not in result["message"]
     assert (ctx.steps[0].success, ctx.steps[0].record_ids) == (False, [])
 
 

@@ -22,6 +22,9 @@ from app.agent.context import Step, TurnContext
 
 logger = logging.getLogger(__name__)
 
+# The model may repeat a tool's message to the customer, so raw exception text stays in the log.
+UPSTREAM_MESSAGE = "The knowledge base is unavailable right now."
+
 
 class ErrorCode(StrEnum):
     INVALID_ARGUMENT = "INVALID_ARGUMENT"
@@ -50,7 +53,8 @@ def tool_guard(tool: Callable[..., Awaitable[ToolResult]]) -> Callable[..., Awai
     """Turn a tool's result or error into the JSON envelope and record the call as a step.
 
     The tool returns a :class:`ToolResult` or raises :class:`ToolError`. Any other
-    exception becomes ``UPSTREAM_ERROR``, so nothing escapes to the agent loop.
+    exception becomes ``UPSTREAM_ERROR`` with a fixed message, so nothing escapes to the
+    agent loop.
     """
     signature = inspect.signature(tool)
     arg_names = list(signature.parameters)[1:]
@@ -65,9 +69,13 @@ def tool_guard(tool: Callable[..., Awaitable[ToolResult]]) -> Callable[..., Awai
             envelope: dict[str, Any] = {"success": True, "data": result.data}
         except ToolError as exc:
             envelope = {"success": False, "code": exc.code, "message": exc.message}
-        except Exception as exc:
+        except Exception:
             logger.exception("tool failed | tool=%s", tool.__name__)
-            envelope = {"success": False, "code": ErrorCode.UPSTREAM_ERROR, "message": str(exc)}
+            envelope = {
+                "success": False,
+                "code": ErrorCode.UPSTREAM_ERROR,
+                "message": UPSTREAM_MESSAGE,
+            }
 
         steps = ctx.context.steps
         bound = signature.bind(ctx, *args, **kwargs).arguments

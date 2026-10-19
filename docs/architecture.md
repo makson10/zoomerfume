@@ -51,7 +51,7 @@ Tools never raise. `tool_guard` (`app/agent/tools/envelope.py`) wraps each one a
 | `NOT_FOUND` | no record with that id |
 | `UPSTREAM_ERROR` | anything else that failed: OpenAI, Qdrant or Postgres |
 
-A tool returns a `ToolResult` (the data and the record ids it came from) or raises `ToolError(code, message)` for an expected failure; any other exception becomes `UPSTREAM_ERROR`. The guard also records every call as a step on the context: tool, arguments, success, code, record ids and duration. The prompt tells Zoomer to say it can't check something when a lookup fails.
+A tool returns a `ToolResult` (the data and the record ids it came from) or raises `ToolError(code, message)` for an expected failure. Any other exception becomes `UPSTREAM_ERROR` with a fixed message, "The knowledge base is unavailable right now." The exception itself goes only to the log, because the model may repeat a tool's message to the customer. The guard also records every call as a step on the context: tool, arguments, success, code, record ids and duration. The prompt tells Zoomer to say it can't check something when a lookup fails.
 
 ## The step cap
 
