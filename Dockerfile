@@ -41,6 +41,10 @@ COPY backend/alembic.ini ./alembic.ini
 COPY backend/scripts/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
+# The knowledge base corpus and the retrieval check questions.
+COPY backend/corpus/ ./corpus/
+COPY backend/eval/ ./eval/
+
 # The built web chat, served by FastAPI at /.
 COPY --from=frontend /frontend/dist/ ./static/
 

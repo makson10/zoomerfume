@@ -1,0 +1,129 @@
+"""Vector search over the knowledge base.
+
+python -m app.kb.search "something warm for winter" -k 5 --type product --max-price 3000
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+from dataclasses import dataclass
+
+from openai import AsyncOpenAI
+from qdrant_client import AsyncQdrantClient, models
+
+from app.core.config import Settings, get_settings
+from app.core.logging import setup_logging
+from app.kb.corpus import RecordType
+from app.kb.embeddings import embed_texts
+from app.services.clients import create_openai_client, create_qdrant_client
+
+
+@dataclass(frozen=True)
+class Hit:
+    """One chunk that matched a query."""
+
+    record_id: str
+    title: str
+    type: str
+    chunk_index: int
+    section: str
+    score: float
+    text: str
+    price: int | None
+
+
+def build_filter(
+    record_type: RecordType | None = None, max_price: int | None = None
+) -> models.Filter | None:
+    """Turn the optional search filters into a Qdrant filter.
+
+    ``max_price`` compares with a product's cheapest bottle. Only products have a price, so
+    it also limits the results to products.
+    """
+    conditions = []
+    if record_type is not None:
+        conditions.append(
+            models.FieldCondition(key="type", match=models.MatchValue(value=record_type))
+        )
+    if max_price is not None:
+        conditions.append(models.FieldCondition(key="price", range=models.Range(lte=max_price)))
+    return models.Filter(must=conditions) if conditions else None
+
+
+async def search(
+    qdrant: AsyncQdrantClient,
+    openai: AsyncOpenAI,
+    settings: Settings,
+    query: str,
+    k: int = 5,
+    record_type: RecordType | None = None,
+    max_price: int | None = None,
+) -> list[Hit]:
+    """Find the ``k`` chunks closest in meaning to the query, best first.
+
+    Args:
+        qdrant: The Qdrant client.
+        openai: The OpenAI client, for embedding the query.
+        settings: The app settings (collection and embedding model).
+        query: The search text.
+        k: How many chunks to return.
+        record_type: Only return chunks of this record type.
+        max_price: Only return products whose cheapest bottle costs at most this, in UAH.
+    """
+    vectors, _ = await embed_texts(
+        openai,
+        [query],
+        model=settings.embedding_model,
+        dimensions=settings.embedding_dimensions,
+    )
+    response = await qdrant.query_points(
+        settings.qdrant_collection,
+        query=vectors[0],
+        query_filter=build_filter(record_type, max_price),
+        limit=k,
+        with_payload=True,
+    )
+    return [
+        Hit(
+            record_id=point.payload["record_id"],
+            title=point.payload["title"],
+            type=point.payload["type"],
+            chunk_index=point.payload["chunk_index"],
+            section=point.payload["section"],
+            score=point.score,
+            text=point.payload["text"],
+            price=point.payload.get("price"),
+        )
+        for point in response.points
+    ]
+
+
+async def _run(settings: Settings, args: argparse.Namespace) -> list[Hit]:
+    qdrant = create_qdrant_client(settings)
+    openai = create_openai_client(settings)
+    try:
+        return await search(qdrant, openai, settings, args.query, args.k, args.type, args.max_price)
+    finally:
+        await openai.close()
+        await qdrant.close()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Search the knowledge base.")
+    parser.add_argument("query")
+    parser.add_argument("-k", type=int, default=5, help="number of chunks (default 5)")
+    parser.add_argument("--type", choices=["product", "policy", "company", "faq", "news"])
+    parser.add_argument("--max-price", type=int, help="products up to this price, in UAH")
+    args = parser.parse_args()
+    settings = get_settings()
+    setup_logging(debug=settings.debug)
+
+    for rank, hit in enumerate(asyncio.run(_run(settings, args)), start=1):
+        price = f" · from {hit.price:,} ₴" if hit.price is not None else ""
+        print(f"{rank}. {hit.score:.3f}  {hit.record_id}  {hit.section}{price}")
+        print(f"   {' '.join(hit.text.split())[:160]}")
+
+
+if __name__ == "__main__":
+    main()
