@@ -43,7 +43,8 @@ async def chat(
 ) -> ChatResponse:
     """Return Zoomer's reply to one message in one of the user's conversations.
 
-    The turn is stored with its status, its citations and its tool steps.
+    The turn is stored with its status, its citations and its tool steps. Only an answer
+    that finished normally gets its citations checked, because fallback texts cite nothing.
 
     Raises:
         ApiError: 401 when nobody is signed in, 429 over the rate limit, 404 when the
@@ -54,7 +55,10 @@ async def chat(
     retrieved_before = await turns.retrieved_ids(conversation.id)
     turn_id = await turns.start(conversation.id)
     result = await runner.run(turn_id, conversation.id, user.name, body.message)
-    citations = check_citations(result.reply, result.retrieved_ids, retrieved_before)
+    if result.status == "ok":
+        citations = check_citations(result.reply, result.retrieved_ids, retrieved_before)
+    else:
+        citations = Citations(valid=[], invalid=[], missing=False)
     await turns.finish(turn_id, result.status, citations, result.steps)
     return ChatResponse(
         reply=result.reply, turn_id=turn_id, citations=citations, steps=result.steps

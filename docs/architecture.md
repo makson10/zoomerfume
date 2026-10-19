@@ -65,6 +65,8 @@ Zoomer cites a record by its id in square brackets right after the fact, e.g. `[
 - **invalid**: no tool returned it in this conversation, so the id was made up or copied from a record's text.
 - **missing**: this turn retrieved records, but the answer cites none of them.
 
+Only an answer that finished normally is checked. A `failed` or `max_steps` turn replies with a fixed text that cites nothing, so it gets empty citations and no warning.
+
 The web chat renders each citation as a chip that opens the full record. Invalid ones are red, and the step log flags invalid and missing citations.
 
 ## What is stored

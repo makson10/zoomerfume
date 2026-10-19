@@ -13,9 +13,11 @@ from app.services.conversations import conversation_title
 
 
 class FakeTurnRunner:
-    """Stands in for ``TurnRunner``: records each call and returns a canned reply and steps."""
+    """Stands in for ``TurnRunner``: records each call and returns a canned reply, status and
+    steps."""
 
     reply = "fake reply"
+    status: TurnStatus = "ok"
 
     def __init__(self) -> None:
         self.calls: list[tuple[uuid.UUID, str, str]] = []
@@ -25,7 +27,7 @@ class FakeTurnRunner:
         self, turn_id: uuid.UUID, conversation_id: uuid.UUID, user_name: str, text: str
     ) -> TurnResult:
         self.calls.append((conversation_id, user_name, text))
-        return TurnResult(reply=self.reply, status="ok", steps=self.steps)
+        return TurnResult(reply=self.reply, status=self.status, steps=self.steps)
 
 
 class FakeUserStore:

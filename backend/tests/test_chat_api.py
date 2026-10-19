@@ -5,6 +5,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
+from app.agent.context import TurnStatus
 from app.db.models import User
 from tests.fakes import (
     FakeConversationStore,
@@ -52,6 +53,25 @@ def test_chat_returns_the_reply_with_citations_and_steps(
     assert (turn.status, turn.citations) == ("ok", body["citations"])
     assert fake_runner.calls == [(conversation.id, "Mary", "hi")]
     assert conversation.title == "hi"
+
+
+@pytest.mark.parametrize("status", ["failed", "max_steps"])
+def test_chat_does_not_check_citations_of_fallback_replies(
+    client: TestClient,
+    user: User,
+    fake_conversations: FakeConversationStore,
+    fake_runner: FakeTurnRunner,
+    status: TurnStatus,
+) -> None:
+    conversation = fake_conversations.add(user.id)
+    fake_runner.reply, fake_runner.status = "Sorry, something went wrong.", status
+    fake_runner.steps = [make_step(["KB-031"])]
+
+    response = client.post(
+        "/api/chat", json={"conversation_id": str(conversation.id), "message": "hi"}
+    )
+
+    assert response.json()["citations"] == {"valid": [], "invalid": [], "missing": False}
 
 
 @pytest.mark.parametrize(
