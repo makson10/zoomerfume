@@ -52,8 +52,9 @@ def test_parse_record_reads_header_and_body(tmp_path: Path) -> None:
         ("KB-002.md", PRODUCT),
         ("KB-001.md", PRODUCT.replace("brand: Test\n", "")),
         ("KB-001.md", "## Overview\n\nNo front matter.\n"),
+        ("KB-001.md", PRODUCT.split("## Overview")[0]),
     ],
-    ids=["id-not-file-name", "product-without-brand", "no-front-matter"],
+    ids=["id-not-file-name", "product-without-brand", "no-front-matter", "empty-body"],
 )
 def test_parse_record_rejects_bad_files(tmp_path: Path, name: str, text: str) -> None:
     with pytest.raises(CorpusError):

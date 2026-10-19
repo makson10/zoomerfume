@@ -84,8 +84,8 @@ def parse_record(path: Path) -> Record:
     """Parse one record file.
 
     Raises:
-        CorpusError: The file has no front matter, the header is invalid, or the id
-            doesn't match the file name.
+        CorpusError: The file has no front matter, the header is invalid, the id
+            doesn't match the file name, or the body is empty.
     """
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
@@ -97,9 +97,12 @@ def parse_record(path: Path) -> Record:
         raise CorpusError(f"{path.name}: {exc}") from exc
     if path.name != f"{header.id}.md":
         raise CorpusError(f"{path.name}: the id {header.id} doesn't match the file name")
+    body = body.strip()
+    if not body:
+        raise CorpusError(f"{path.name}: the body is empty")
     return Record(
         header=header,
-        body=body.strip(),
+        body=body,
         source=path.name,
         content_hash=hashlib.sha256(text.encode()).hexdigest(),
     )

@@ -83,8 +83,6 @@ async def ingest(
                 return summary
 
             for record, chunks in chunked:
-                if not chunks:
-                    continue
                 vectors, tokens = await embed_texts(
                     openai,
                     [chunk.embed_text for chunk in chunks],
