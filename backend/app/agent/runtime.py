@@ -11,7 +11,15 @@ import uuid
 from datetime import UTC, datetime
 from functools import partial
 
-from agents import Agent, ModelSettings, RunConfig, RunContextWrapper, Runner
+from agents import (
+    Agent,
+    ModelSettings,
+    RunConfig,
+    RunContextWrapper,
+    RunErrorHandlerInput,
+    RunErrorHandlerResult,
+    Runner,
+)
 from agents.extensions.memory import SQLAlchemySession
 from agents.items import TResponseInputItem
 from openai.types.shared import Reasoning
@@ -19,12 +27,18 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.agent.context import TurnContext
 from app.agent.prompts import AGENT_INSTRUCTIONS
+from app.agent.tools import TOOLS
 from app.core.config import Settings
 from app.db.message_log import record_turn_messages
+from app.kb.knowledge_base import KnowledgeBase
 
 logger = logging.getLogger(__name__)
 
 FALLBACK_TEXT = "Oops, something went wrong on my side. Please try again in a minute."
+MAX_STEPS_TEXT = (
+    "Sorry, I couldn't finish that in {steps} steps. "
+    "Could you ask again in a simpler way, or one question at a time?"
+)
 
 
 def _agent_instructions(wrapper: RunContextWrapper[TurnContext], agent: Agent) -> str:
@@ -108,14 +122,16 @@ class TurnRunner:
     ``get_turn_runner`` dependency.
     """
 
-    def __init__(self, settings: Settings, engine: AsyncEngine) -> None:
+    def __init__(self, settings: Settings, engine: AsyncEngine, kb: KnowledgeBase) -> None:
         self._settings = settings
         self._engine = engine
         self._sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
-        self._agent = Agent(
+        self._kb = kb
+        self.agent = Agent(
             name="Zoomer",
             instructions=_agent_instructions,
             model=settings.chat_model,
+            tools=TOOLS,
             # The chat model doesn't accept `temperature`; low reasoning effort
             # keeps replies quick and consistent.
             model_settings=ModelSettings(reasoning=Reasoning(effort="low")),
@@ -125,7 +141,8 @@ class TurnRunner:
     async def run(self, conversation_id: uuid.UUID, user_name: str, text: str) -> str:
         """Run one user turn and return Zoomer's reply.
 
-        Any runtime error degrades to :data:`FALLBACK_TEXT`, so the chat never goes
+        Any runtime error degrades to :data:`FALLBACK_TEXT`, and a run that hits
+        ``AGENT_MAX_TURNS`` ends with :data:`MAX_STEPS_TEXT`, so the chat never goes
         silent. The exchange is written to the message log after the run.
 
         Args:
@@ -139,16 +156,18 @@ class TurnRunner:
             user_name=user_name,
             turn_id=uuid.uuid4().hex,
             user_message=text.strip(),
+            kb=self._kb,
         )
 
         try:
             result = await Runner.run(
-                self._agent,
+                self.agent,
                 ctx.user_message,
                 session=self._session(conversation_id),
                 context=ctx,
                 max_turns=self._settings.agent_max_turns,
                 run_config=self._run_config(conversation_id),
+                error_handlers={"max_turns": self._out_of_steps},
             )
             reply = (result.final_output or "").strip()
         except Exception:
@@ -161,6 +180,17 @@ class TurnRunner:
         if self._settings.message_log_enabled:
             await record_turn_messages(self._sessionmaker, ctx, reply)
         return reply
+
+    def _out_of_steps(self, data: RunErrorHandlerInput[TurnContext]) -> RunErrorHandlerResult:
+        """End a run that hit the step limit with a polite answer instead of an error."""
+        ctx = data.context.context
+        logger.warning(
+            "agent hit the step limit | conversation=%s steps=%d",
+            ctx.conversation_id,
+            len(ctx.steps),
+        )
+        steps = self._settings.agent_max_turns
+        return RunErrorHandlerResult(final_output=MAX_STEPS_TEXT.format(steps=steps))
 
     def _session(self, conversation_id: uuid.UUID) -> SQLAlchemySession:
         return SQLAlchemySession(str(conversation_id), engine=self._engine, ensure_ascii=False)

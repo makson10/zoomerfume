@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import uuid
 
-from app.db.models import Conversation, Message, User
+from app.db.models import Conversation, KbRecord, Message, User
+from app.kb.search import Hit
 from app.services.conversations import conversation_title
 
 
@@ -89,3 +90,39 @@ class FakeRateLimiter:
     async def hit(self, key: str, limit: int) -> int | None:
         self.hits.append((key, limit))
         return self.retry_after
+
+
+def make_hit(record_id: str, score: float = 0.8) -> Hit:
+    return Hit(
+        record_id=record_id,
+        title=f"Record {record_id}",
+        type="product",
+        chunk_index=0,
+        section=f"Record {record_id} › Overview",
+        updated="2026-09-01",
+        score=score,
+        text=f"Text of {record_id}.",
+        price=2500,
+    )
+
+
+class FakeKnowledgeBase:
+    """Stands in for ``KnowledgeBase``: canned hits and records. Records every search, and
+    raises ``error`` when it is set."""
+
+    def __init__(self) -> None:
+        self.hits: list[Hit] = []
+        self.records: dict[str, KbRecord] = {}
+        self.searches: list[tuple[str, int, str | None, int | None]] = []
+        self.error: Exception | None = None
+
+    async def search(
+        self, query: str, k: int, record_type: str | None, max_price: int | None
+    ) -> list[Hit]:
+        self.searches.append((query, k, record_type, max_price))
+        if self.error is not None:
+            raise self.error
+        return self.hits[:k]
+
+    async def get_record(self, record_id: str) -> KbRecord | None:
+        return self.records.get(record_id)

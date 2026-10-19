@@ -131,7 +131,7 @@ Unit tests live in `backend/tests/` and run with pytest (`asyncio_mode = "auto"`
 - `conftest.py` builds `Settings` in code with `_env_file=None`, so a real key in `.env` is never read.
 - The `client` fixture overrides `get_turn_runner`, `get_user_store`, `get_conversation_store` and `get_rate_limiter` with in-memory fakes from `tests/fakes.py`, and uses `TestClient` without `with`, so the lifespan never runs and nothing touches Postgres. The client keeps cookies, so the `user` fixture signs in through `/api/auth/phone` like a browser.
 - The fakes don't run SQL. The upserts in `UserStore` and `RateLimiter` are checked against a real database in the smoke checks.
-- Runtime tests replace `Runner.run`. The runner's engine is created but never connects.
+- Runtime tests run the real agent loop on the SDK's `ScriptedModel` (`agents.testing`), with in-memory history and a fake knowledge base. Tool tests call each tool through `on_invoke_tool`, the way the agent loop does.
 - Web chat tests mount a tiny fake build from a temporary directory.
 - Knowledge base tests cover header parsing, the corpus checks (including a run over the shipped `backend/corpus/`), chunk limits, overlap and breadcrumbs, point ids and search filters. `tiktoken` downloads the `cl100k_base` encoding on first use and caches it, so the first chunking test needs network access.
 

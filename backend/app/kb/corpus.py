@@ -19,6 +19,8 @@ RecordType = Literal["product", "policy", "company", "faq", "news"]
 Availability = Literal["in_stock", "few_left", "pre_order", "discontinued"]
 
 PRODUCT_FIELDS = ("brand", "concentration", "family", "gender", "seasons", "availability")
+# A record id: "KB-" and three digits, e.g. "KB-042".
+RECORD_ID_PATTERN = r"^KB-\d{3}$"
 
 
 class CorpusError(ValueError):
@@ -40,7 +42,7 @@ class RecordHeader(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(pattern=r"^KB-\d{3}$")
+    id: str = Field(pattern=RECORD_ID_PATTERN)
     title: str = Field(min_length=1)
     type: RecordType
     updated: date

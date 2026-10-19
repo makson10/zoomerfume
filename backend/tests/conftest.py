@@ -16,6 +16,7 @@ from app.db.models import User
 from app.main import create_app
 from tests.fakes import (
     FakeConversationStore,
+    FakeKnowledgeBase,
     FakeRateLimiter,
     FakeTurnRunner,
     FakeUserStore,
@@ -31,6 +32,11 @@ def settings() -> Settings:
         session_secret="test-secret-" + "x" * 32,
         message_log_enabled=False,
     )
+
+
+@pytest.fixture
+def fake_kb() -> FakeKnowledgeBase:
+    return FakeKnowledgeBase()
 
 
 @pytest.fixture

@@ -28,6 +28,8 @@ class Hit:
     type: str
     chunk_index: int
     section: str
+    # The record's last update, e.g. "2026-09-14".
+    updated: str
     score: float
     text: str
     price: int | None
@@ -91,6 +93,7 @@ async def search(
             type=point.payload["type"],
             chunk_index=point.payload["chunk_index"],
             section=point.payload["section"],
+            updated=point.payload["updated"],
             score=point.score,
             text=point.payload["text"],
             price=point.payload.get("price"),

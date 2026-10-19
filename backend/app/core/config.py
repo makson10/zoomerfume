@@ -25,10 +25,10 @@ class Settings(BaseSettings):
 
     # ── Agent runtime ─────────────────────────────────────────────────────
     # Hard ceiling on agent-loop iterations per turn. One "turn" is a single
-    # model call (which may batch several parallel tool calls); the Agents SDK
-    # raises MaxTurnsExceeded once this is passed. Bounds a pathological tool
-    # loop so a confused run can't burn tokens unchecked.
-    agent_max_turns: int = 15
+    # model call (which may batch several parallel tool calls). A run that needs
+    # more ends with a polite "couldn't finish" answer, so a confused tool loop
+    # can't burn tokens unchecked.
+    agent_max_turns: int = 5
     # Conversation-history window. Each turn the agent is fed only the last N
     # user turns verbatim; older turns are dropped from the *model input*
     # (never deleted from the stored session), so input-token cost and latency
