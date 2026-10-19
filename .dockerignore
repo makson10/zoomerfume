@@ -33,9 +33,10 @@ backend/data/
 .git/
 .gitignore
 
-# Documentation
+# Documentation (only the repo docs: the corpus in backend/corpus is Markdown too)
 docs/
-**/*.md
+README.md
+CLAUDE.md
 
 # Docker files (not needed inside image)
 docker-compose*.yml
