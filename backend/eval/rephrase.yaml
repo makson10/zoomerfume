@@ -1,0 +1,45 @@
+# Rephrased questions for app.kb.eval_rephrase. Each question avoids the key words of the
+# record that answers it, so only a search by meaning can find it.
+# `expected` lists every record that fully answers the question: the target first, then
+# any FAQ or policy that covers the same thing.
+
+- question: how long can my package sit at the post office before it goes back?
+  expected: [KB-075, KB-042]
+- question: how do I know I'm not getting a knockoff?
+  expected: [KB-051, KB-067, KB-061]
+- question: can I try a tiny bit before committing to a whole bottle?
+  expected: [KB-052, KB-069]
+- question: will you make it look pretty for a birthday present?
+  expected: [KB-053, KB-080]
+- question: can I hand the money over at the door for a really expensive order?
+  expected: [KB-046, KB-079]
+- question: if I buy late in the afternoon, does it still go out today?
+  expected: [KB-041]
+- question: I'm in the capital and need it tonight, possible?
+  expected: [KB-043, KB-091]
+- question: can my sister in Warsaw get an order?
+  expected: [KB-045, KB-081]
+- question: can I spread the cost over a few months?
+  expected: [KB-047, KB-078]
+- question: do people who spend a lot get better perks?
+  expected: [KB-056]
+- question: what's the most bonus I can knock off my bill?
+  expected: [KB-055, KB-076]
+- question: the glass cracked on the way and it's leaking, help
+  expected: [KB-050, KB-071]
+- question: do you use a lot of plastic when you mail stuff?
+  expected: [KB-066]
+- question: if something isn't in stock yet, can I reserve it?
+  expected: [KB-054, KB-085]
+- question: which city do my packages come from?
+  expected: [KB-062]
+- question: something that smells like an old bar with a cigar and a drink?
+  expected: [KB-026]
+- question: a scent like sitting next to burning logs in winter
+  expected: [KB-025]
+- question: something that smells like a cold stream in the Alps
+  expected: [KB-029]
+- question: which one smells a bit different on everyone, like your own skin but better?
+  expected: [KB-027]
+- question: something light and happy for a teenage girl's first bottle
+  expected: [KB-020]
