@@ -17,6 +17,7 @@ from sqlalchemy import (
     Text,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -95,7 +96,7 @@ class Turn(Base):
     conversation_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
     )
-    # "running" | "ok" | "max_steps" | "failed"
+    # "running" | "ok" | "max_steps" | "cancelled" | "failed"
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     # {"valid": [...], "invalid": [...], "missing": bool}. Empty while the turn runs.
     citations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -105,7 +106,16 @@ class Turn(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     steps: Mapped[list[ToolStep]] = relationship(order_by="ToolStep.step", lazy="raise")
 
-    __table_args__ = (Index("ix_turns_conversation_id", "conversation_id"),)
+    __table_args__ = (
+        Index("ix_turns_conversation_id", "conversation_id"),
+        # One running turn per conversation: a second message waits for the first reply.
+        Index(
+            "ux_turns_one_running",
+            "conversation_id",
+            unique=True,
+            postgresql_where=text("status = 'running'"),
+        ),
+    )
 
 
 class ToolStep(Base):

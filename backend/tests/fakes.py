@@ -149,17 +149,22 @@ def make_step(record_ids: list[str]) -> Step:
 
 
 class FakeTurnStore:
-    """Stands in for ``TurnStore`` with turns and their steps kept in memory."""
+    """Stands in for ``TurnStore`` with turns and their steps kept in memory. Like the real
+    store, it starts no turn while another one in the conversation is running."""
 
     def __init__(self) -> None:
         self.turns: dict[uuid.UUID, Turn] = {}
 
     def add(
-        self, conversation_id: uuid.UUID, citations: Citations | None, steps: list[Step]
+        self,
+        conversation_id: uuid.UUID,
+        citations: Citations | None,
+        steps: list[Step],
+        status: str = "ok",
     ) -> Turn:
         turn = Turn(id=uuid.uuid4(), conversation_id=conversation_id, status="running")
         self.turns[turn.id] = turn
-        self._finish(turn, "ok", citations, steps)
+        self._finish(turn, status, citations, steps)
         return turn
 
     def _finish(
@@ -169,7 +174,12 @@ class FakeTurnStore:
         turn.citations = citations.model_dump() if citations else None
         turn.steps = [ToolStep(turn_id=turn.id, **step.model_dump()) for step in steps]
 
-    async def start(self, conversation_id: uuid.UUID) -> uuid.UUID:
+    async def start(self, conversation_id: uuid.UUID) -> uuid.UUID | None:
+        if any(
+            turn.conversation_id == conversation_id and turn.status == "running"
+            for turn in self.turns.values()
+        ):
+            return None
         turn = Turn(id=uuid.uuid4(), conversation_id=conversation_id, status="running")
         self.turns[turn.id] = turn
         return turn.id

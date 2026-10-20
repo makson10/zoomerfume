@@ -138,3 +138,23 @@ def test_chat_over_the_rate_limit_gets_429(
     assert response.json()["error"]["code"] == "RATE_LIMITED"
     assert fake_limiter.hits[-1] == (f"chat:user:{user.id}", 20)
     assert fake_runner.calls == []
+
+
+def test_chat_refuses_a_message_while_a_reply_is_running(
+    client: TestClient,
+    user: User,
+    fake_conversations: FakeConversationStore,
+    fake_turns: FakeTurnStore,
+    fake_runner: FakeTurnRunner,
+) -> None:
+    conversation = fake_conversations.add(user.id)
+    fake_turns.add(conversation.id, citations=None, steps=[], status="running")
+
+    response = client.post(
+        "/api/chat", json={"conversation_id": str(conversation.id), "message": "hi"}
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "REPLY_IN_PROGRESS"
+    assert fake_runner.calls == []
+    assert conversation.title is None
