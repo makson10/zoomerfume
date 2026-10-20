@@ -2,7 +2,7 @@
 
 **Zoomer** is the AI shop assistant of **Zoomerfume**, a fictional Ukrainian online perfume shop. It recommends perfumes by taste, budget, occasion and season, compares products, answers shop questions (delivery, returns, payment, loyalty) and gives general perfume advice. The goal is a *grounded* assistant: answers about the shop come from a knowledge base the model searches through tools, with citations to the records it used, not from the model's memory.
 
-> **Status: early version.** The current version is a web chat with Zoomer on top of a non-streaming chat API. Customers sign in with a phone number and keep several conversations each. Zoomer looks things up in the shop's knowledge base (96 records: products, policies, FAQ, company pages, news) through two tools, `search_kb` and `open_record`, and cites the records it used. Citations show up as chips that open the full record, and every answer has a step log of the tools it called. Replies are not streamed yet.
+> **Status: early version.** The current version is a web chat with Zoomer on top of a streaming chat API. Customers sign in with a phone number and keep several conversations each. Zoomer looks things up in the shop's knowledge base (96 records: products, policies, FAQ, company pages, news) through two tools, `search_kb` and `open_record`, and cites the records it used. Replies stream in token by token and can be stopped. Citations show up as chips that open the full record, and every answer has a step log of the tools it called.
 
 ## Stack
 
@@ -26,7 +26,7 @@ Postgres (users, conversations, agent history, turns and tool steps, message log
           knowledge base records; later notes, costs)
 ```
 
-One Docker image runs the API and serves the built web chat. Postgres and Qdrant run as separate services. How a chat turn works (tools, the error envelope, the 5-step cap, citations): [docs/architecture.md](docs/architecture.md).
+One Docker image runs the API and serves the built web chat. Postgres and Qdrant run as separate services. How a chat turn works (streaming, Stop, tools, the error envelope, the 5-step cap, citations): [docs/architecture.md](docs/architecture.md).
 
 ## Quick start (Docker)
 
@@ -41,7 +41,7 @@ docker compose up --build
 
 Open http://localhost:8000. Zoomer asks for your phone number, and for your name if the number is new. There is no SMS code, since the shop is fictional. Your conversations are listed on the left; "New chat" starts another one. Log out to switch to a different customer.
 
-To answer shop questions, Zoomer needs the knowledge base loaded first (see [Load the knowledge base](#load-the-knowledge-base)). Then ask something like "vanilla and tobacco under 3,000 ₴?": the answer cites records as chips (click one to read the full record), and the line under it shows which tools Zoomer used. A general question such as "EDP vs EDT?" shows "No tools used". The **Tools** button shows the exact tool schemas the model receives.
+To answer shop questions, Zoomer needs the knowledge base loaded first (see [Load the knowledge base](#load-the-knowledge-base)). Then ask something like "vanilla and tobacco under 3,000 ₴?": while Zoomer searches you see which tool it is using, then the answer streams in. It cites records as chips (click one to read the full record), and the line under it shows which tools Zoomer used. A general question such as "EDP vs EDT?" shows "No tools used". The Stop button next to the message box stops a reply halfway; what Zoomer wrote so far stays. The **Tools** button shows the exact tool schemas the model receives.
 
 `docker compose up` also loads `docker-compose.override.yml` (auto-reload, host ports for Postgres and Qdrant). Add `--watch` to sync backend code changes into the running container.
 
@@ -55,16 +55,20 @@ curl -c jar -b jar -X POST localhost:8000/api/auth/create \
   -H 'content-type: application/json' -d '{"phone": "050 111 22 33", "name": "Mary"}'
 curl -b jar -X POST localhost:8000/api/conversations
 # → {"id": "<conversation id>", "title": null}
-curl -b jar -X POST localhost:8000/api/chat \
+curl -N -b jar -X POST localhost:8000/api/chat/stream \
   -H 'content-type: application/json' \
   -d '{"conversation_id": "<conversation id>", "message": "vanilla and tobacco under 3000 UAH?"}'
-# → {"reply": "... [KB-026]", "turn_id": "...",
+# → server-sent events: tool_call, tool_result, token, token, …, citation, done
+curl -b jar -X POST localhost:8000/api/chat \
+  -H 'content-type: application/json' \
+  -d '{"conversation_id": "<conversation id>", "message": "and something lighter?"}'
+# → {"turn_id": "...", "reply": "... [KB-026]", "status": "ok",
 #    "citations": {"valid": ["KB-026"], "invalid": [], "missing": false},
 #    "steps": [{"step": 1, "tool": "search_kb", "args": {...}, "success": true, "record_ids": [...], ...}]}
 curl -b jar localhost:8000/api/records/KB-026      # the cited record in full
 ```
 
-Send another message with the same `conversation_id` to continue the conversation. Health check: `curl localhost:8000/health`.
+`/api/chat/stream` sends the reply as it is written; `/api/chat` runs the same turn and returns it in one piece. Send another message with the same `conversation_id` to continue the conversation. A conversation answers one message at a time: a message sent while a reply is still running gets a 409. Health check: `curl localhost:8000/health`.
 
 ## Load the knowledge base
 
@@ -158,7 +162,7 @@ zoomerfume/
 ├── backend/
 │   ├── app/
 │   │   ├── api/          HTTP routes (health, auth, conversations, chat, records, tool schemas), web chat mount
-│   │   ├── agent/        Zoomer: agent runtime, prompt, per-turn context, tools, citation check
+│   │   ├── agent/        Zoomer: agent runtime, turn events, prompt, per-turn context, tools, citation check
 │   │   ├── core/         settings, logging, input validation
 │   │   ├── db/           SQLAlchemy engine, models, message log
 │   │   ├── kb/           knowledge base: parsing, chunking, ingest, search, checks
@@ -175,7 +179,7 @@ zoomerfume/
 │   ├── public/           logo
 │   └── package.json      npm project
 ├── docs/retrieval.md             chunking, HNSW and retrieval results
-├── docs/architecture.md          a chat turn: tools, error envelope, step cap, citations
+├── docs/architecture.md          a chat turn: streaming, Stop, tools, error envelope, step cap, citations
 ├── .github/workflows/ci.yml      CI pipeline
 ├── Dockerfile
 ├── docker-compose.yml            api + postgres + qdrant
