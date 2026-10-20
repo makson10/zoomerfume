@@ -1,52 +1,57 @@
 """OpenAI Agents SDK runtime.
 
-Owns :class:`TurnRunner`, which produces Zoomer's reply for a single user message,
-and the per-conversation :class:`agents.SQLiteSession` that stores the history.
+Owns :class:`TurnRunner`, which runs one turn: Zoomer's streamed reply to a single
+user message. Each conversation's history lives in Postgres, in an SDK
+``SQLAlchemySession``.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import uuid
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
-from pathlib import Path
+from typing import TYPE_CHECKING
 
+import anyio
 from agents import (
     Agent,
     ModelSettings,
     RunConfig,
     RunContextWrapper,
+    RunErrorHandlerInput,
+    RunErrorHandlerResult,
     Runner,
-    SQLiteSession,
 )
+from agents.extensions.memory import SQLAlchemySession
 from agents.items import TResponseInputItem
 from openai.types.shared import Reasoning
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
-from app.agent.context import TurnContext
+from app.agent.citations import Citations, check_citations
+from app.agent.context import Step, TurnContext, TurnStatus
 from app.agent.prompts import AGENT_INSTRUCTIONS
+from app.agent.streaming import Token, TurnEvent, agent_events
+from app.agent.tools import TOOLS
 from app.core.config import Settings
+from app.db.guard import WRITE_TIMEOUT_S
 from app.db.message_log import record_turn_messages
+from app.kb.knowledge_base import KnowledgeBase
+
+if TYPE_CHECKING:
+    from app.services.turns import TurnStore
 
 logger = logging.getLogger(__name__)
 
-# ── SQLite session storage ────────────────────────────────────────────────────
-# One file shared across conversations; the session id (the conversation id)
-# keeps them isolated.
-# The directory is created lazily on first use. The model input is bounded two
-# ways: by *age* (RetentionSQLiteSession.get_items below drops turns older than
-# `history_retention_days`) and by *count* (`window_history` keeps the last
-# `history_window_turns`). Both filter the model input only — nothing is ever
-# deleted from the stored session.
-
-_SESSIONS_DIR = Path("data/agents")
-_SESSIONS_DB = _SESSIONS_DIR / "sessions.db"
-
-
 FALLBACK_TEXT = "Oops, something went wrong on my side. Please try again in a minute."
+MAX_STEPS_TEXT = (
+    "Sorry, I couldn't finish that in {steps} steps. "
+    "Could you ask again in a simpler way, or one question at a time?"
+)
 
 
 def _agent_instructions(wrapper: RunContextWrapper[TurnContext], agent: Agent) -> str:
@@ -61,68 +66,6 @@ def _agent_instructions(wrapper: RunContextWrapper[TurnContext], agent: Agent) -
         f"{AGENT_INSTRUCTIONS}\nCurrent date and time: {now} UTC.\n"
         f"The customer's name is {wrapper.context.user_name}."
     )
-
-
-class RetentionSQLiteSession(SQLiteSession):
-    """SQLiteSession that hides turns older than ``history_retention_days`` from
-    the *model input*, while leaving every row on disk.
-
-    The SDK builds the model input by calling ``get_items()`` with no limit (its
-    ``SessionSettings.limit`` defaults to ``None``); only that call is
-    age-filtered — an explicit ``limit`` or a disabled age cap defers to the
-    parent unchanged. The cut is snapped to a turn boundary (see
-    :func:`_turn_start_indices`) so a ``function_call`` is never returned without
-    its ``function_call_output`` (which would 400 the Responses API).
-    """
-
-    def __init__(self, session_id: str, db_path: str, *, retention_days: int) -> None:
-        super().__init__(session_id, db_path)
-        self.retention_days = retention_days
-
-    async def get_items(self, limit: int | None = None) -> list[TResponseInputItem]:
-        days = self.retention_days
-        if limit is not None or days <= 0:
-            return await super().get_items(limit)
-
-        def _get_recent_sync() -> list[TResponseInputItem]:
-            with self._locked_connection() as conn:
-                cursor = conn.execute(
-                    f"""
-                    SELECT message_data, created_at >= datetime('now', ?) AS within
-                    FROM {self.messages_table}
-                    WHERE session_id = ?
-                    ORDER BY id ASC
-                    """,
-                    (f"-{days} days", self.session_id),
-                )
-                rows = cursor.fetchall()
-
-            items: list[TResponseInputItem] = []
-            within: list[bool] = []
-            for message_data, is_within in rows:
-                try:
-                    item = json.loads(message_data)
-                except (json.JSONDecodeError, TypeError):
-                    # Mirror the parent: skip corrupt JSON. Keep items/within aligned
-                    # by only appending to both on a successful decode.
-                    continue
-                items.append(item)
-                within.append(bool(is_within))
-
-            starts = _turn_start_indices(items)
-            # Earliest turn-start within the window; none → every turn is stale,
-            # so feed the model nothing (it starts fresh). Rows stay on disk.
-            cut = next((s for s in starts if within[s]), len(items))
-            if cut:
-                logger.debug(
-                    "history age-windowed | items %d -> %d (last %d days)",
-                    len(items),
-                    len(items) - cut,
-                    days,
-                )
-            return items[cut:]
-
-        return await asyncio.to_thread(_get_recent_sync)
 
 
 def _is_input_message(item: TResponseInputItem) -> bool:
@@ -169,12 +112,9 @@ def window_history(
 
     Bounds per-turn input tokens on long conversations by dropping older turns
     from the *model input* only — the stored session is untouched (the SDK
-    persists ``new_items`` regardless). This is the *count* cap; it runs on the
-    history already *age*-filtered by :class:`RetentionSQLiteSession`, so the
-    model sees turns that are both recent enough and few enough.
-    ``turns <= 0`` disables windowing. Cuts strictly on turn boundaries (see
-    :func:`_turn_start_indices`), never mid-turn, so a tool-call is never orphaned
-    from its output.
+    persists ``new_items`` regardless). ``turns <= 0`` disables windowing. Cuts
+    strictly on turn boundaries (see :func:`_turn_start_indices`), never mid-turn,
+    so a tool-call is never orphaned from its output.
     """
     if turns <= 0:
         return history + new_items
@@ -188,77 +128,153 @@ def window_history(
     return history[cut:] + new_items
 
 
+@dataclass(frozen=True)
+class NewTurn:
+    """A customer's message and the running turn started for it."""
+
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    user_name: str
+    message: str
+    # The records the tools returned in the conversation's earlier turns.
+    retrieved_before: set[str]
+
+
+class TurnResult(BaseModel):
+    """Zoomer's reply to one message, with how the turn ended, its checked citations and
+    the tool calls behind it."""
+
+    turn_id: uuid.UUID
+    reply: str
+    status: TurnStatus
+    citations: Citations
+    steps: list[Step]
+
+
 class TurnRunner:
-    """Produces Zoomer's reply for one user message and logs the exchange.
+    """Runs Zoomer's turns and stores how they end.
 
     Created once in the app lifespan and handed to routes through the
     ``get_turn_runner`` dependency.
     """
 
-    def __init__(
-        self,
-        settings: Settings,
-        sessionmaker: async_sessionmaker[AsyncSession],
-    ) -> None:
+    def __init__(self, settings: Settings, engine: AsyncEngine, kb: KnowledgeBase) -> None:
         self._settings = settings
-        self._sessionmaker = sessionmaker
-        self._agent = Agent(
+        self._engine = engine
+        self._sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+        self._kb = kb
+        self.agent = Agent(
             name="Zoomer",
             instructions=_agent_instructions,
             model=settings.chat_model,
+            tools=TOOLS,
             # The chat model doesn't accept `temperature`; low reasoning effort
             # keeps replies quick and consistent.
             model_settings=ModelSettings(reasoning=Reasoning(effort="low")),
         )
         logger.info("Agent created | model=%s", settings.chat_model)
 
-    async def run(self, conversation_id: uuid.UUID, user_name: str, text: str) -> str:
-        """Run one user turn and return Zoomer's reply.
+    async def stream(
+        self, turn: NewTurn, turns: TurnStore
+    ) -> AsyncIterator[TurnEvent | TurnResult]:
+        """Run one turn and yield its events as they happen, then its :class:`TurnResult`.
 
-        Any runtime error degrades to :data:`FALLBACK_TEXT`, so the chat never goes
-        silent. The exchange is written to the message log after the run.
+        Any runtime error degrades to :data:`FALLBACK_TEXT`, and a run that hits
+        ``AGENT_MAX_TURNS`` ends with :data:`MAX_STEPS_TEXT`, so the chat never goes
+        silent. Only an answer that finished normally gets its citations checked,
+        because those fixed texts cite nothing. The exchange goes to the message log,
+        and the turn is stored with its status, citations and tool steps.
+
+        Closing the stream early (the customer pressed Stop or left) cancels the run.
+        The turn is stored as ``cancelled``, and the reply so far is kept in the
+        conversation's history and in the message log, so Zoomer knows what it already
+        said.
 
         Args:
-            conversation_id: The conversation the turn belongs to. It is also the
-                SDK session id, so each conversation has its own history.
-            user_name: The signed-in customer's name, for the instructions.
-            text: The customer's message.
+            turn: The turn to run. The conversation id is also the SDK session id, so
+                each conversation has its own history.
+            turns: Where the turn is stored when it ends.
         """
         ctx = TurnContext(
-            conversation_id=conversation_id,
-            user_name=user_name,
-            turn_id=uuid.uuid4().hex,
-            user_message=text.strip(),
+            conversation_id=turn.conversation_id,
+            user_name=turn.user_name,
+            turn_id=turn.id,
+            user_message=turn.message.strip(),
+            kb=self._kb,
         )
-
+        session = self._session(turn.conversation_id)
+        result = Runner.run_streamed(
+            self.agent,
+            ctx.user_message,
+            session=session,
+            context=ctx,
+            max_turns=self._settings.agent_max_turns,
+            run_config=self._run_config(turn.conversation_id),
+            error_handlers={"max_turns": self._out_of_steps},
+        )
+        streamed = ""
         try:
-            result = await Runner.run(
-                self._agent,
-                ctx.user_message,
-                session=self._session(conversation_id),
-                context=ctx,
-                max_turns=self._settings.agent_max_turns,
-                run_config=self._run_config(conversation_id),
-            )
+            async for event in agent_events(result, ctx.steps):
+                if isinstance(event, Token):
+                    streamed += event.text
+                yield event
             reply = (result.final_output or "").strip()
         except Exception:
-            logger.exception("agent run failed | conversation=%s", conversation_id)
+            logger.exception("agent run failed | conversation=%s", turn.conversation_id)
             reply = ""
+        except (asyncio.CancelledError, GeneratorExit):
+            result.cancel()
+            # The stream is being cancelled, so the writes need a shield and a time limit.
+            with anyio.move_on_after(WRITE_TIMEOUT_S, shield=True):
+                await self._store_stopped_turn(ctx, session, turns, streamed.strip())
+            raise
 
         if not reply:
-            ctx.degraded = True
+            ctx.status = "failed"
             reply = FALLBACK_TEXT
+        citations = Citations()
+        if ctx.status == "ok":
+            citations = check_citations(reply, ctx.retrieved_ids, turn.retrieved_before)
         if self._settings.message_log_enabled:
             await record_turn_messages(self._sessionmaker, ctx, reply)
-        return reply
-
-    def _session(self, conversation_id: uuid.UUID) -> SQLiteSession:
-        _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-        return RetentionSQLiteSession(
-            str(conversation_id),
-            str(_SESSIONS_DB),
-            retention_days=self._settings.history_retention_days,
+        await turns.finish(turn.id, ctx.status, citations, ctx.steps)
+        yield TurnResult(
+            turn_id=turn.id, reply=reply, status=ctx.status, citations=citations, steps=ctx.steps
         )
+
+    async def _store_stopped_turn(
+        self, ctx: TurnContext, session: SQLAlchemySession, turns: TurnStore, reply: str
+    ) -> None:
+        """Store a stopped turn with its tool steps, and keep the reply it wrote so far."""
+        logger.info(
+            "turn stopped | conversation=%s steps=%d chars=%d",
+            ctx.conversation_id,
+            len(ctx.steps),
+            len(reply),
+        )
+        try:
+            await turns.finish(ctx.turn_id, "cancelled", Citations(), ctx.steps)
+            if reply:
+                await session.add_items([{"role": "assistant", "content": reply}])
+        except Exception:
+            logger.exception("stopped turn not stored | conversation=%s", ctx.conversation_id)
+        if self._settings.message_log_enabled:
+            await record_turn_messages(self._sessionmaker, ctx, reply)
+
+    def _out_of_steps(self, data: RunErrorHandlerInput[TurnContext]) -> RunErrorHandlerResult:
+        """End a run that hit the step limit with a polite answer instead of an error."""
+        ctx = data.context.context
+        ctx.status = "max_steps"
+        logger.warning(
+            "agent hit the step limit | conversation=%s steps=%d",
+            ctx.conversation_id,
+            len(ctx.steps),
+        )
+        steps = self._settings.agent_max_turns
+        return RunErrorHandlerResult(final_output=MAX_STEPS_TEXT.format(steps=steps))
+
+    def _session(self, conversation_id: uuid.UUID) -> SQLAlchemySession:
+        return SQLAlchemySession(str(conversation_id), engine=self._engine, ensure_ascii=False)
 
     def _run_config(self, conversation_id: uuid.UUID) -> RunConfig:
         """Build the run config: history windowing and a ``conversation:<id>`` prompt cache key.

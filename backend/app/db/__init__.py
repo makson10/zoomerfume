@@ -1,7 +1,6 @@
-"""Postgres persistence (async SQLAlchemy).
+"""Postgres persistence (async SQLAlchemy): the engine, the ORM models and the message log.
 
-Currently a side-write message log: every chat exchange is recorded as a user
-row and an assistant row (:class:`~app.db.models.Message`). Writes are fail-open —
-a database outage logs and returns rather than ever delaying or breaking a chat
-turn. The schema is owned by Alembic (migrated on container start).
+The schema is owned by Alembic and migrated on container start. Agent history lives in
+the ``agent_sessions`` and ``agent_messages`` tables, which the Agents SDK reads and writes
+itself, so they have no ORM models here.
 """

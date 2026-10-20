@@ -1,3 +1,4 @@
+import type { Citations, Step, TurnStatus } from './chat.ts'
 import { getJson, postJson } from './client.ts'
 
 export interface Conversation {
@@ -10,6 +11,12 @@ export interface StoredMessage {
   id: number
   role: 'user' | 'assistant'
   content: string
+  turn_id: string | null
+  /** How the reply's turn ended. Set on Zoomer's replies that have a recorded turn. */
+  status: TurnStatus | null
+  /** Set on Zoomer's replies that have a recorded turn. */
+  citations: Citations | null
+  steps: Step[]
 }
 
 /** The signed-in user's conversations, the most recently active first. */

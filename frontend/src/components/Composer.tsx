@@ -1,25 +1,32 @@
 import { ActionIcon, Group, Textarea } from '@mantine/core'
-import { IconSend } from '@tabler/icons-react'
-import type { KeyboardEvent } from 'react'
+import { IconPlayerStopFilled, IconSend } from '@tabler/icons-react'
+import { useState, type KeyboardEvent } from 'react'
 
 const MAX_MESSAGE_LENGTH = 4000
 
 interface ComposerProps {
-  value: string
-  onChange: (value: string) => void
-  onSend: () => void
+  onSend: (text: string) => void
+  /** When set, a Stop button replaces Send. */
+  onStop?: () => void
   disabled: boolean
   placeholder?: string
 }
 
+/** The message box. It keeps its own draft, so typing doesn't re-render the chat. */
 export function Composer({
-  value,
-  onChange,
   onSend,
+  onStop,
   disabled,
   placeholder = 'Message Zoomer…',
 }: ComposerProps) {
-  const canSend = !disabled && value.trim().length > 0
+  const [draft, setDraft] = useState('')
+  const canSend = !disabled && draft.trim().length > 0
+
+  function send() {
+    if (!canSend) return
+    onSend(draft.trim())
+    setDraft('')
+  }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (
@@ -28,7 +35,7 @@ export function Composer({
       !event.nativeEvent.isComposing
     ) {
       event.preventDefault()
-      if (canSend) onSend()
+      send()
     }
   }
 
@@ -42,19 +49,25 @@ export function Composer({
         minRows={1}
         maxRows={6}
         maxLength={MAX_MESSAGE_LENGTH}
-        value={value}
-        onChange={(event) => onChange(event.currentTarget.value)}
+        value={draft}
+        onChange={(event) => setDraft(event.currentTarget.value)}
         onKeyDown={handleKeyDown}
         autoFocus
       />
-      <ActionIcon
-        size="input-sm"
-        onClick={onSend}
-        disabled={!canSend}
-        aria-label="Send"
-      >
-        <IconSend size={18} />
-      </ActionIcon>
+      {onStop ? (
+        <ActionIcon size="input-sm" onClick={onStop} aria-label="Stop">
+          <IconPlayerStopFilled size={18} />
+        </ActionIcon>
+      ) : (
+        <ActionIcon
+          size="input-sm"
+          onClick={send}
+          disabled={!canSend}
+          aria-label="Send"
+        >
+          <IconSend size={18} />
+        </ActionIcon>
+      )}
     </Group>
   )
 }
