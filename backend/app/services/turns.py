@@ -84,11 +84,12 @@ class TurnStore:
         return set(result)
 
     async def for_conversation(self, conversation_id: uuid.UUID) -> list[Turn]:
-        """Return the conversation's turns with their tool steps and model calls, in three
-        queries."""
+        """Return the conversation's turns, oldest first, with their tool steps and model
+        calls, in three queries."""
         result = await self._session.scalars(
             select(Turn)
             .where(Turn.conversation_id == conversation_id)
+            .order_by(Turn.started_at)
             .options(selectinload(Turn.steps), selectinload(Turn.calls))
         )
         return list(result)

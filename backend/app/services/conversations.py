@@ -62,6 +62,14 @@ class ConversationStore:
         )
         return list(result)
 
+    async def log_command(self, conversation_id: uuid.UUID, command: str, reply: str) -> None:
+        """Add a chat command and its reply to the conversation's message log."""
+        self._session.add_all(
+            Message(conversation_id=conversation_id, role=role, content=content, kind="command")
+            for role, content in [("user", command), ("assistant", reply)]
+        )
+        await self._session.commit()
+
     async def mark_active(self, conversation: Conversation) -> None:
         """Move the conversation to the top of the list."""
         conversation.updated_at = datetime.now(UTC)

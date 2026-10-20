@@ -280,7 +280,7 @@
           "chat"
         ],
         "summary": "Chat",
-        "description": "Return Zoomer's reply to one message in one of the user's conversations, or in a\nnew one.\n\nIt runs the same turn as ``/api/chat/stream`` and returns the stream's last event.\n\nRaises:\n    ApiError: 401 when nobody is signed in, 429 over the rate limit, 404 when the\n        conversation isn't the user's, 409 while another reply in it is running.",
+        "description": "Return Zoomer's reply to one message in one of the user's conversations, or in a\nnew one.\n\nIt runs the same turn as ``/api/chat/stream`` and returns the stream's last event. A\nchat command such as ``/cost`` gets its reply as a ``TurnDone``.\n\nRaises:\n    ApiError: 401 when nobody is signed in, 429 over the rate limit, 404 when the\n        conversation isn't the user's, 409 while another reply in it is running.",
         "operationId": "chat_api_chat_post",
         "requestBody": {
           "content": {
@@ -298,7 +298,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TurnResult"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TurnResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TurnDone"
+                    }
+                  ],
+                  "title": "Response Chat Api Chat Post"
                 }
               }
             }
@@ -322,7 +330,7 @@
           "chat"
         ],
         "summary": "Chat Stream",
-        "description": "Stream Zoomer's reply to one message as server-sent events.\n\n``start`` names the conversation and the turn, which is how the web chat learns the id\nof a new conversation. ``token`` events carry the reply as the model writes it, and each\ntool call sends ``tool_call`` and then ``tool_result`` with its step. The stream ends\nwith ``citation``, ``usage`` (the turn's tokens and cost) and ``done``. ``done`` carries\nthe stored reply, which replaces the streamed text, because the fallback and step-limit\ntexts are never streamed.\n``error`` ends a stream that broke. Closing the connection stops the turn.\n\nThe return type lists the events' data models for the OpenAPI schema. Each one is\nsent as a ``ServerSentEvent`` with its event name.\n\nRaises:\n    ApiError: Before the stream starts, the same errors as ``/api/chat``.",
+        "description": "Stream Zoomer's reply to one message as server-sent events.\n\n``start`` names the conversation and the turn, which is how the web chat learns the id\nof a new conversation. ``token`` events carry the reply as the model writes it, and each\ntool call sends ``tool_call`` and then ``tool_result`` with its step. The stream ends\nwith ``citation``, ``usage`` (the turn's tokens and cost) and ``done``. ``done`` carries\nthe stored reply, which replaces the streamed text, because the fallback and step-limit\ntexts are never streamed. ``error`` ends a stream that broke. Closing the connection\nstops the turn. A chat command such as ``/cost`` runs no turn: its stream is a single\n``done``.\n\nThe return type lists the events' data models for the OpenAPI schema. Each one is\nsent as a ``ServerSentEvent`` with its event name.\n\nRaises:\n    ApiError: Before the stream starts, the same errors as ``/api/chat``.",
         "operationId": "chat_stream_api_chat_stream_post",
         "requestBody": {
           "content": {
@@ -1022,8 +1030,15 @@
       "TurnDone": {
         "properties": {
           "turn_id": {
-            "type": "string",
-            "format": "uuid",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Turn Id"
           },
           "reply": {
@@ -1048,7 +1063,7 @@
           "status"
         ],
         "title": "TurnDone",
-        "description": "The ``done`` event: the stored reply, which replaces the streamed text."
+        "description": "The ``done`` event: the stored reply, which replaces the streamed text.\n\nIt is also the whole answer to a chat command such as ``/cost``, which runs no turn."
       },
       "TurnResult": {
         "properties": {

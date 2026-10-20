@@ -75,6 +75,8 @@ class Message(Base):
     # "user" | "assistant"
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # "chat" | "command": a chat command such as /cost and its reply, which run no turn.
+    kind: Mapped[str] = mapped_column(String(16), server_default="chat", nullable=False)
     # Shared by the user message and the reply it produced.
     turn_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("turns.id", ondelete="SET NULL"), nullable=True

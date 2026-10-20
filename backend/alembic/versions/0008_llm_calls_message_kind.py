@@ -1,7 +1,8 @@
-"""llm_calls
+"""llm_calls and messages.kind
 
 One row per model call with its token usage and cost: the chat calls of each turn and
-the embedding calls of searches and ingest runs.
+the embedding calls of searches and ingest runs. Messages get a kind, so a chat command
+such as /cost and its reply are told apart from the chat itself.
 
 Revision ID: 0008
 Revises: 0007
@@ -46,8 +47,13 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_llm_calls_turn_id", "llm_calls", ["turn_id"])
+    op.add_column(
+        "messages",
+        sa.Column("kind", sa.String(length=16), server_default="chat", nullable=False),
+    )
 
 
 def downgrade() -> None:
+    op.drop_column("messages", "kind")
     op.drop_index("ix_llm_calls_turn_id", table_name="llm_calls")
     op.drop_table("llm_calls")

@@ -164,7 +164,8 @@ export interface paths {
      * @description Return Zoomer's reply to one message in one of the user's conversations, or in a
      *     new one.
      *
-     *     It runs the same turn as ``/api/chat/stream`` and returns the stream's last event.
+     *     It runs the same turn as ``/api/chat/stream`` and returns the stream's last event. A
+     *     chat command such as ``/cost`` gets its reply as a ``TurnDone``.
      *
      *     Raises:
      *         ApiError: 401 when nobody is signed in, 429 over the rate limit, 404 when the
@@ -195,8 +196,9 @@ export interface paths {
      *     tool call sends ``tool_call`` and then ``tool_result`` with its step. The stream ends
      *     with ``citation``, ``usage`` (the turn's tokens and cost) and ``done``. ``done`` carries
      *     the stored reply, which replaces the streamed text, because the fallback and step-limit
-     *     texts are never streamed.
-     *     ``error`` ends a stream that broke. Closing the connection stops the turn.
+     *     texts are never streamed. ``error`` ends a stream that broke. Closing the connection
+     *     stops the turn. A chat command such as ``/cost`` runs no turn: its stream is a single
+     *     ``done``.
      *
      *     The return type lists the events' data models for the OpenAPI schema. Each one is
      *     sent as a ``ServerSentEvent`` with its event name.
@@ -519,13 +521,12 @@ export interface components {
     /**
      * TurnDone
      * @description The ``done`` event: the stored reply, which replaces the streamed text.
+     *
+     *     It is also the whole answer to a chat command such as ``/cost``, which runs no turn.
      */
     TurnDone: {
-      /**
-       * Turn Id
-       * Format: uuid
-       */
-      turn_id: string
+      /** Turn Id */
+      turn_id: string | null
       /** Reply */
       reply: string
       /**
@@ -879,7 +880,9 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['TurnResult']
+          'application/json':
+            | components['schemas']['TurnResult']
+            | components['schemas']['TurnDone']
         }
       }
       /** @description Client Error */

@@ -100,6 +100,13 @@ class FakeConversationStore:
     async def messages(self, conversation_id: uuid.UUID) -> list[Message]:
         return self.transcripts.get(conversation_id, [])
 
+    async def log_command(self, conversation_id: uuid.UUID, command: str, reply: str) -> None:
+        transcript = self.transcripts.setdefault(conversation_id, [])
+        for role, content in [("user", command), ("assistant", reply)]:
+            transcript.append(
+                Message(conversation_id=conversation_id, role=role, content=content, kind="command")
+            )
+
     async def mark_active(self, conversation: Conversation) -> None:
         self.conversations.remove(conversation)
         self.conversations.insert(0, conversation)
@@ -206,8 +213,14 @@ class FakeTurnStore:
         steps: list[Step],
         status: str = "ok",
         calls: list[CallUsage] | None = None,
+        started_at: datetime | None = None,
     ) -> Turn:
-        turn = Turn(id=uuid.uuid4(), conversation_id=conversation_id, status="running")
+        turn = Turn(
+            id=uuid.uuid4(),
+            conversation_id=conversation_id,
+            status="running",
+            started_at=started_at or datetime.now(UTC),
+        )
         self.turns[turn.id] = turn
         self._finish(turn, status, citations, steps, calls or [])
         return turn
@@ -231,7 +244,12 @@ class FakeTurnStore:
             for turn in self.turns.values()
         ):
             return None
-        turn = Turn(id=uuid.uuid4(), conversation_id=conversation_id, status="running")
+        turn = Turn(
+            id=uuid.uuid4(),
+            conversation_id=conversation_id,
+            status="running",
+            started_at=datetime.now(UTC),
+        )
         self.turns[turn.id] = turn
         return turn.id
 
