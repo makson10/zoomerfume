@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.guard import pg_guard
 from app.db.models import Conversation, Message
 
 TITLE_MAX_LENGTH = 60
@@ -61,6 +62,19 @@ class ConversationStore:
             select(Message).where(Message.conversation_id == conversation_id).order_by(Message.id)
         )
         return list(result)
+
+    @pg_guard
+    async def log_command(self, conversation_id: uuid.UUID, command: str, reply: str) -> None:
+        """Add a chat command and its reply to the conversation's message log.
+
+        Like every message-log write, it is fail-open: a failed or slow write is logged and
+        skipped, so the command still gets its answer.
+        """
+        self._session.add_all(
+            Message(conversation_id=conversation_id, role=role, content=content, kind="command")
+            for role, content in [("user", command), ("assistant", reply)]
+        )
+        await self._session.commit()
 
     async def mark_active(self, conversation: Conversation) -> None:
         """Move the conversation to the top of the list."""

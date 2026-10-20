@@ -11,7 +11,7 @@ interface ChatPanelProps {
   error: string | null
   emptyText?: string
   placeholder?: string
-  onSend: (text: string) => void
+  onSend: (text: string) => void | Promise<boolean>
   onStop?: () => void
   /** Opens a cited record. Without it, citations stay plain text. */
   onOpenRecord?: (recordId: string) => void

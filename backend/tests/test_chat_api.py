@@ -9,7 +9,10 @@ from fastapi.testclient import TestClient
 
 from app.agent.citations import Citations
 from app.agent.runtime import FALLBACK_TEXT
+from app.core.config import Settings
 from app.db.models import User
+from app.services.cost_report import NOTHING_YET
+from app.services.usage import CallUsage
 from tests.fakes import (
     FakeConversationStore,
     FakeRateLimiter,
@@ -25,6 +28,17 @@ def test_health_returns_ok(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+# The usage of the fake runner's one model call.
+USAGE = {
+    "calls": 1,
+    "input_tokens": 2000,
+    "cached_tokens": 1800,
+    "cache_write_tokens": 100,
+    "output_tokens": 50,
+    "cost_usd": "0.000065500",
+}
 
 
 def test_chat_runs_a_turn_and_returns_its_result(
@@ -57,6 +71,7 @@ def test_chat_runs_a_turn_and_returns_its_result(
         "status": "ok",
         "citations": {"valid": [], "invalid": [], "missing": False},
         "steps": [make_step(["KB-031"]).model_dump()],
+        "usage": USAGE,
     }
     assert fake_turns.turns[turn.id].status == "ok"
 
@@ -95,8 +110,38 @@ def test_chat_stream_sends_the_turn_as_events(
         ("tool_result", step.model_dump()),
         ("token", {"text": "fake reply"}),
         ("citation", {"valid": ["KB-031"], "invalid": [], "missing": False}),
+        ("usage", USAGE),
         ("done", {"turn_id": turn_id, "status": "ok", "reply": "fake reply"}),
     ]
+
+
+def test_cost_command_answers_from_the_stored_calls_without_a_turn(
+    client: TestClient,
+    settings: Settings,
+    user: User,
+    fake_conversations: FakeConversationStore,
+    fake_turns: FakeTurnStore,
+    fake_runner: FakeTurnRunner,
+) -> None:
+    settings.message_log_enabled = True
+    conversation = fake_conversations.add(user.id)
+    call = CallUsage("chat", "gpt-6-luna", 2000, 0, 1800, 40)
+    fake_turns.add(conversation.id, citations=None, steps=[], calls=[call])
+
+    response = client.post(
+        "/api/chat/stream", json={"conversation_id": str(conversation.id), "message": "/cost"}
+    )
+    new_chat = client.post("/api/chat", json={"message": "/COST"})
+
+    [(event, data)] = _events(response.text)
+    assert (event, data["turn_id"], data["status"]) == ("done", None, "ok")
+    assert "| 1 | " in data["reply"] and "$0.000265" in data["reply"]
+    assert new_chat.json() == {"turn_id": None, "reply": NOTHING_YET, "status": "ok"}
+    assert fake_runner.calls == []
+    assert len(fake_turns.turns) == 1
+    assert len(fake_conversations.conversations) == 1
+    logged = fake_conversations.transcripts[conversation.id]
+    assert [(m.role, m.kind) for m in logged] == [("user", "command"), ("assistant", "command")]
 
 
 def test_chat_stream_ends_with_an_error_event_when_the_turn_breaks(

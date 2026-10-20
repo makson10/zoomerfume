@@ -1,18 +1,19 @@
-"""Turns and the tool steps the agent took in them."""
+"""Turns, the tool steps the agent took in them and their model calls."""
 
 from __future__ import annotations
 
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import ColumnElement, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import InstrumentedAttribute, selectinload
 
 from app.agent.citations import Citations
 from app.agent.context import Step, TurnStatus
-from app.db.models import ToolStep, Turn
+from app.db.models import LlmCall, ToolStep, Turn
+from app.services.usage import CallUsage, TurnUsage
 
 # A turn still running after this long was left behind by a server that stopped mid-turn.
 STALE_TURN_AFTER = timedelta(minutes=2)
@@ -22,7 +23,7 @@ RUNNING_TURN_INDEX_WHERE = text("status = 'running'")
 
 
 class TurnStore:
-    """Reads and writes turns and their tool steps in Postgres."""
+    """Reads and writes turns, their tool steps and their model calls in Postgres."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -55,15 +56,21 @@ class TurnStore:
         return turn_id
 
     async def finish(
-        self, turn_id: uuid.UUID, status: TurnStatus, citations: Citations, steps: list[Step]
+        self,
+        turn_id: uuid.UUID,
+        status: TurnStatus,
+        citations: Citations,
+        steps: list[Step],
+        calls: list[CallUsage],
     ) -> None:
-        """Store how the turn ended, its citations and its tool steps."""
+        """Store how the turn ended, its citations, its tool steps and its model calls."""
         await self._session.execute(
             update(Turn)
             .where(Turn.id == turn_id)
             .values(status=status, citations=citations.model_dump(), finished_at=func.now())
         )
         self._session.add_all(ToolStep(turn_id=turn_id, **step.model_dump()) for step in steps)
+        self._session.add_all(call.as_row(turn_id) for call in calls)
         await self._session.commit()
 
     async def retrieved_ids(self, conversation_id: uuid.UUID) -> set[str]:
@@ -77,10 +84,38 @@ class TurnStore:
         return set(result)
 
     async def for_conversation(self, conversation_id: uuid.UUID) -> list[Turn]:
-        """Return the conversation's turns with their tool steps, in two queries."""
+        """Return the conversation's turns, oldest first, with their tool steps, in two
+        queries."""
         result = await self._session.scalars(
             select(Turn)
             .where(Turn.conversation_id == conversation_id)
+            .order_by(Turn.started_at)
             .options(selectinload(Turn.steps))
         )
         return list(result)
+
+    async def usage_by_turn(self, conversation_id: uuid.UUID) -> dict[uuid.UUID, TurnUsage]:
+        """Return what each of the conversation's turns used and cost, summed in one query.
+
+        Turns without a stored model call are left out.
+        """
+        is_chat = LlmCall.kind == "chat"
+        rows = await self._session.execute(
+            select(
+                LlmCall.turn_id,
+                func.count().filter(is_chat).label("calls"),
+                _chat_sum(LlmCall.input_tokens, is_chat).label("input_tokens"),
+                _chat_sum(LlmCall.cached_tokens, is_chat).label("cached_tokens"),
+                _chat_sum(LlmCall.cache_write_tokens, is_chat).label("cache_write_tokens"),
+                _chat_sum(LlmCall.output_tokens, is_chat).label("output_tokens"),
+                func.sum(LlmCall.cost_usd).label("cost_usd"),
+            )
+            .join(Turn, Turn.id == LlmCall.turn_id)
+            .where(Turn.conversation_id == conversation_id)
+            .group_by(LlmCall.turn_id)
+        )
+        return {row.turn_id: TurnUsage.model_validate(row, from_attributes=True) for row in rows}
+
+
+def _chat_sum(column: InstrumentedAttribute[int], is_chat: ColumnElement[bool]) -> ColumnElement:
+    return func.coalesce(func.sum(column).filter(is_chat), 0)

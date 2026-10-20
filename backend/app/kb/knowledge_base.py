@@ -10,6 +10,7 @@ from app.core.config import Settings
 from app.db.models import KbRecord
 from app.kb.corpus import RecordType
 from app.kb.search import Hit, search
+from app.services.usage import CallUsage
 
 
 class KnowledgeBase:
@@ -32,11 +33,13 @@ class KnowledgeBase:
 
     async def search(
         self, query: str, k: int, record_type: RecordType | None, max_price: int | None
-    ) -> list[Hit]:
-        """Return the ``k`` chunks closest in meaning to the query, best first."""
-        return await search(
+    ) -> tuple[list[Hit], CallUsage]:
+        """Return the ``k`` chunks closest in meaning to the query, best first, and the usage
+        of the query's embedding call."""
+        hits, tokens = await search(
             self._qdrant, self._openai, self._settings, query, k, record_type, max_price
         )
+        return hits, CallUsage("embedding", self._settings.embedding_model, tokens)
 
     async def get_record(self, record_id: str) -> KbRecord | None:
         """Return the full record, or None when there is no record with this id."""

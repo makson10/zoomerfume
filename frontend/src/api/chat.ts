@@ -8,10 +8,11 @@ import type {
   ToolCall,
   TurnDone,
   TurnStart,
+  TurnUsage,
 } from './schema.d.ts'
 import { readEvents } from './sse.ts'
 
-export type { Citations, Step }
+export type { Citations, Step, TurnUsage }
 
 /** A turn's state: `running` while Zoomer answers, then how the turn ended. */
 export type TurnStatus = 'running' | TurnDone['status']
@@ -24,7 +25,12 @@ export type ChatEvent =
   | { event: 'tool_call'; data: ToolCall }
   | { event: 'tool_result'; data: Step }
   | { event: 'citation'; data: Citations }
-  /** `reply` is the stored reply, which replaces the streamed text. */
+  /** The turn's model calls: tokens and cost. */
+  | { event: 'usage'; data: TurnUsage }
+  /**
+   * `reply` is the stored reply, which replaces the streamed text. A chat command
+   * such as `/cost` sends only this event.
+   */
   | { event: 'done'; data: TurnDone }
   | { event: 'error'; data: ErrorDetail }
 

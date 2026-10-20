@@ -157,7 +157,7 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
             greeting ??
             `Hi, ${user.name}! Ask me about our perfumes, prices, delivery or returns, or anything about perfume.`
           }
-          onSend={(text) => void chat.send(text)}
+          onSend={chat.send}
           onStop={chat.stop}
           onOpenRecord={setRecordId}
         />

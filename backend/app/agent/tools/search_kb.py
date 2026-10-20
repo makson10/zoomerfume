@@ -35,7 +35,8 @@ async def search_kb(
     """
     if not query.strip():
         raise ToolError(ErrorCode.INVALID_ARGUMENT, "The query is empty.")
-    hits = await ctx.context.kb.search(query, k, record_type, max_price)
+    hits, usage = await ctx.context.kb.search(query, k, record_type, max_price)
+    ctx.context.calls.append(usage)
     return ToolResult(
         data={"hits": [{**asdict(hit), "score": round(hit.score, 3)} for hit in hits]},
         record_ids=list(dict.fromkeys(hit.record_id for hit in hits)),

@@ -61,7 +61,7 @@ async def search(
     k: int = 5,
     record_type: RecordType | None = None,
     max_price: int | None = None,
-) -> list[Hit]:
+) -> tuple[list[Hit], int]:
     """Find the ``k`` chunks closest in meaning to the query, best first.
 
     Args:
@@ -72,8 +72,11 @@ async def search(
         k: How many chunks to return.
         record_type: Only return chunks of this record type.
         max_price: Only return products whose cheapest bottle costs at most this, in UAH.
+
+    Returns:
+        The hits, and the number of tokens the query's embedding was billed for.
     """
-    vectors, _ = await embed_texts(
+    vectors, tokens = await embed_texts(
         openai,
         [query],
         model=settings.embedding_model,
@@ -86,7 +89,7 @@ async def search(
         limit=k,
         with_payload=True,
     )
-    return [
+    hits = [
         Hit(
             record_id=point.payload["record_id"],
             title=point.payload["title"],
@@ -100,13 +103,17 @@ async def search(
         )
         for point in response.points
     ]
+    return hits, tokens
 
 
 async def _run(settings: Settings, args: argparse.Namespace) -> list[Hit]:
     qdrant = create_qdrant_client(settings)
     openai = create_openai_client(settings)
     try:
-        return await search(qdrant, openai, settings, args.query, args.k, args.type, args.max_price)
+        hits, _ = await search(
+            qdrant, openai, settings, args.query, args.k, args.type, args.max_price
+        )
+        return hits
     finally:
         await openai.close()
         await qdrant.close()
