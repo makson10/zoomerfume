@@ -52,7 +52,7 @@ function toChatMessage(message: StoredMessage): ChatMessage {
  * The most recent conversation opens on load. "New chat" only clears the view;
  * the server creates the conversation when its first turn starts. Replies stream in
  * token by token. `stop()` cancels the one in progress, and so does unmounting,
- * for example on log out.
+ * for example on log out. `notesVersion` goes up each time Zoomer saves a note.
  */
 export function useChat() {
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -61,6 +61,7 @@ export function useChat() {
   const [loading, setLoading] = useState(true)
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notesVersion, setNotesVersion] = useState(0)
   const replyRequest = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -154,6 +155,9 @@ export function useChat() {
               steps: [...(reply.steps ?? []), chatEvent.data],
               activeTool: null,
             }))
+            if (chatEvent.data.tool === 'save_note' && chatEvent.data.success) {
+              setNotesVersion((version) => version + 1)
+            }
             break
           case 'citation':
             updateReply(() => ({ citations: chatEvent.data }))
@@ -211,6 +215,7 @@ export function useChat() {
     loading,
     streaming,
     error,
+    notesVersion,
     send,
     stop,
     newChat,
