@@ -52,7 +52,9 @@ function toChatMessage(message: StoredMessage): ChatMessage {
  * The most recent conversation opens on load. "New chat" only clears the view;
  * the server creates the conversation when its first turn starts. Replies stream in
  * token by token. `stop()` cancels the one in progress, and so does unmounting,
- * for example on log out. `notesVersion` goes up each time Zoomer saves a note.
+ * for example on log out. A message refused before its turn starts (a rate limit,
+ * for example) leaves the chat, and `send()` resolves to `false`, so the composer
+ * can give the text back. `notesVersion` goes up each time Zoomer saves a note.
  */
 export function useChat() {
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -104,7 +106,8 @@ export function useChat() {
     }
   }
 
-  async function send(text: string) {
+  async function send(text: string): Promise<boolean> {
+    const questionId = crypto.randomUUID()
     const replyId = crypto.randomUUID()
     const updateReply = (
       change: (reply: ChatMessage) => Partial<ChatMessage>,
@@ -119,7 +122,7 @@ export function useChat() {
     replyRequest.current = request
     setMessages((current) => [
       ...current,
-      { id: crypto.randomUUID(), role: 'user', content: text },
+      { id: questionId, role: 'user', content: text },
       {
         id: replyId,
         role: 'assistant',
@@ -130,6 +133,7 @@ export function useChat() {
     ])
     setError(null)
     setStreaming(true)
+    let started = false
     try {
       let done = false
       for await (const chatEvent of streamMessage(
@@ -139,6 +143,7 @@ export function useChat() {
       )) {
         switch (chatEvent.event) {
           case 'start':
+            started = true
             setActiveId(chatEvent.data.conversation_id)
             listConversations().then(setConversations, () => undefined)
             break
@@ -175,10 +180,13 @@ export function useChat() {
         }
       }
       if (!done) throw new Error('The reply stream ended early.')
+      return true
     } catch (error) {
       const stopped = request.signal.aborted
+      const refused = !started && !stopped
       setMessages((current) =>
         current.flatMap((message) => {
+          if (refused && message.id === questionId) return []
           if (message.id !== replyId) return [message]
           if (!stopped || !message.content) return []
           return [
@@ -192,6 +200,7 @@ export function useChat() {
         }),
       )
       if (!stopped) setError(errorText(error))
+      return !refused
     } finally {
       replyRequest.current = null
       setStreaming(false)
