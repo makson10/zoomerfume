@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -16,6 +16,9 @@ from app.db.models import ToolStep, Turn
 
 # A turn still running after this long was left behind by a server that stopped mid-turn.
 STALE_TURN_AFTER = timedelta(minutes=2)
+# The partial index's predicate as literal SQL. Postgres matches ON CONFLICT to the index
+# by its predicate, and a bound parameter stops matching once the statement is cached.
+RUNNING_TURN_INDEX_WHERE = text("status = 'running'")
 
 
 class TurnStore:
@@ -44,7 +47,7 @@ class TurnStore:
             insert(Turn)
             .values(id=uuid.uuid4(), conversation_id=conversation_id, status="running")
             .on_conflict_do_nothing(
-                index_elements=[Turn.conversation_id], index_where=Turn.status == "running"
+                index_elements=[Turn.conversation_id], index_where=RUNNING_TURN_INDEX_WHERE
             )
             .returning(Turn.id)
         )
