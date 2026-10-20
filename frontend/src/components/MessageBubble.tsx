@@ -1,4 +1,5 @@
-import { Group, Paper, Stack, Text } from '@mantine/core'
+import { Code, Group, Loader, Paper, Stack, Text } from '@mantine/core'
+import { memo } from 'react'
 import type { ChatMessage } from '../hooks/useChat.ts'
 import { CitationChip } from './CitationChip.tsx'
 import { MarkdownText } from './MarkdownText.tsx'
@@ -10,7 +11,15 @@ interface MessageBubbleProps {
   onOpenRecord?: (recordId: string) => void
 }
 
-export function MessageBubble({ message, onOpenRecord }: MessageBubbleProps) {
+/**
+ * One chat message. It is memoized: while a reply streams, only the bubble whose
+ * message changed re-renders and re-parses its Markdown. A reply that hasn't
+ * written anything yet shows a loader and the tool Zoomer is using.
+ */
+export const MessageBubble = memo(function MessageBubble({
+  message,
+  onOpenRecord,
+}: MessageBubbleProps) {
   if (message.role === 'user') {
     return (
       <Paper
@@ -38,11 +47,20 @@ export function MessageBubble({ message, onOpenRecord }: MessageBubbleProps) {
 
   return (
     <Stack gap={6} maw="85%" style={{ alignSelf: 'flex-start' }}>
-      <Paper px="md" py="xs" withBorder>
-        <MarkdownText renderCitation={renderCitation}>
-          {message.content}
-        </MarkdownText>
-      </Paper>
+      {message.status === 'running' && !message.content ? (
+        <Loader type="dots" size="sm" />
+      ) : (
+        <Paper px="md" py="xs" withBorder>
+          <MarkdownText renderCitation={renderCitation}>
+            {message.content}
+          </MarkdownText>
+        </Paper>
+      )}
+      {message.activeTool && (
+        <Text size="xs" c="dimmed">
+          Using <Code>{message.activeTool}</Code>…
+        </Text>
+      )}
       {citations && onOpenRecord && citations.valid.length > 0 && (
         <Group gap={4}>
           <Text size="xs" c="dimmed">
@@ -58,8 +76,12 @@ export function MessageBubble({ message, onOpenRecord }: MessageBubbleProps) {
         </Group>
       )}
       {citations && (
-        <StepLog steps={message.steps ?? []} citations={citations} />
+        <StepLog
+          steps={message.steps ?? []}
+          citations={citations}
+          stopped={message.status === 'cancelled'}
+        />
       )}
     </Stack>
   )
-}
+})

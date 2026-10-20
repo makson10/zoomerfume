@@ -21,21 +21,27 @@ if TYPE_CHECKING:
 async def record_turn_messages(
     sessionmaker: async_sessionmaker[AsyncSession], ctx: TurnContext, reply: str
 ) -> None:
-    """Persist the user message + Zoomer's reply for a turn."""
+    """Persist the user message + Zoomer's reply for a turn.
+
+    A turn stopped before Zoomer wrote anything has no reply row.
+    """
     rows = [
         Message(
             conversation_id=ctx.conversation_id,
             role="user",
             content=ctx.user_message,
             turn_id=ctx.turn_id,
-        ),
-        Message(
-            conversation_id=ctx.conversation_id,
-            role="assistant",
-            content=reply,
-            turn_id=ctx.turn_id,
-        ),
+        )
     ]
+    if reply:
+        rows.append(
+            Message(
+                conversation_id=ctx.conversation_id,
+                role="assistant",
+                content=reply,
+                turn_id=ctx.turn_id,
+            )
+        )
     async with sessionmaker() as session:
         session.add_all(rows)
         await session.commit()

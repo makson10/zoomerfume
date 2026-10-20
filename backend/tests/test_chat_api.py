@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import uuid
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.agent.context import TurnStatus
+from app.agent.citations import Citations
+from app.agent.runtime import FALLBACK_TEXT
 from app.db.models import User
 from tests.fakes import (
     FakeConversationStore,
@@ -24,7 +27,7 @@ def test_health_returns_ok(client: TestClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_chat_returns_the_reply_with_citations_and_steps(
+def test_chat_runs_a_turn_and_returns_its_result(
     client: TestClient,
     user: User,
     fake_conversations: FakeConversationStore,
@@ -33,7 +36,6 @@ def test_chat_returns_the_reply_with_citations_and_steps(
 ) -> None:
     conversation = fake_conversations.add(user.id)
     fake_turns.add(conversation.id, citations=None, steps=[make_step(["KB-012"])])
-    fake_runner.reply = "Try KB-031 [KB-031], or KB-012 from before [KB-012], not [KB-099]."
     fake_runner.steps = [make_step(["KB-031"])]
 
     response = client.post(
@@ -41,37 +43,84 @@ def test_chat_returns_the_reply_with_citations_and_steps(
     )
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["reply"] == fake_runner.reply
-    assert body["citations"] == {
-        "valid": ["KB-031", "KB-012"],
-        "invalid": ["KB-099"],
-        "missing": False,
+    [turn] = fake_runner.calls
+    assert (turn.conversation_id, turn.user_name, turn.message, turn.retrieved_before) == (
+        conversation.id,
+        "Mary",
+        "hi",
+        {"KB-012"},
+    )
+    assert response.json() == {
+        "turn_id": str(turn.id),
+        "reply": "fake reply",
+        "status": "ok",
+        "citations": {"valid": [], "invalid": [], "missing": False},
+        "steps": [make_step(["KB-031"]).model_dump()],
     }
-    assert body["steps"] == [make_step(["KB-031"]).model_dump()]
-    turn = fake_turns.turns[uuid.UUID(body["turn_id"])]
-    assert (turn.status, turn.citations) == ("ok", body["citations"])
-    assert fake_runner.calls == [(conversation.id, "Mary", "hi")]
+    assert fake_turns.turns[turn.id].status == "ok"
     assert conversation.title == "hi"
 
 
-@pytest.mark.parametrize("status", ["failed", "max_steps"])
-def test_chat_does_not_check_citations_of_fallback_replies(
+def _events(stream: str) -> list[tuple[str, Any]]:
+    """Read a server-sent event stream as (event, data) pairs."""
+    events = []
+    for block in stream.strip().split("\n\n"):
+        fields = dict(line.split(": ", 1) for line in block.splitlines())
+        events.append((fields["event"], json.loads(fields["data"])))
+    return events
+
+
+def test_chat_stream_sends_the_turn_as_events(
     client: TestClient,
     user: User,
     fake_conversations: FakeConversationStore,
     fake_runner: FakeTurnRunner,
-    status: TurnStatus,
 ) -> None:
     conversation = fake_conversations.add(user.id)
-    fake_runner.reply, fake_runner.status = "Sorry, something went wrong.", status
-    fake_runner.steps = [make_step(["KB-031"])]
+    step = make_step(["KB-031"])
+    fake_runner.steps = [step]
+    fake_runner.citations = Citations(valid=["KB-031"])
 
     response = client.post(
-        "/api/chat", json={"conversation_id": str(conversation.id), "message": "hi"}
+        "/api/chat/stream", json={"conversation_id": str(conversation.id), "message": "hi"}
     )
 
-    assert response.json()["citations"] == {"valid": [], "invalid": [], "missing": False}
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache"
+    turn_id = str(fake_runner.calls[0].id)
+    assert _events(response.text) == [
+        ("tool_call", {"tool": "search_kb", "args": {"query": "vanilla"}}),
+        ("tool_result", step.model_dump()),
+        ("token", {"text": "fake reply"}),
+        ("citation", {"valid": ["KB-031"], "invalid": [], "missing": False}),
+        ("done", {"turn_id": turn_id, "status": "ok", "reply": "fake reply"}),
+    ]
+
+
+def test_chat_stream_ends_with_an_error_event_when_the_turn_breaks(
+    client: TestClient,
+    user: User,
+    fake_conversations: FakeConversationStore,
+    fake_turns: FakeTurnStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conversation = fake_conversations.add(user.id)
+
+    async def broken_finish(*args: Any) -> None:
+        raise RuntimeError("database is down")
+
+    monkeypatch.setattr(fake_turns, "finish", broken_finish)
+
+    response = client.post(
+        "/api/chat/stream", json={"conversation_id": str(conversation.id), "message": "hi"}
+    )
+
+    assert response.status_code == 200
+    assert _events(response.text)[-1] == (
+        "error",
+        {"code": "INTERNAL_ERROR", "message": FALLBACK_TEXT},
+    )
 
 
 @pytest.mark.parametrize(
@@ -138,3 +187,23 @@ def test_chat_over_the_rate_limit_gets_429(
     assert response.json()["error"]["code"] == "RATE_LIMITED"
     assert fake_limiter.hits[-1] == (f"chat:user:{user.id}", 20)
     assert fake_runner.calls == []
+
+
+@pytest.mark.parametrize("path", ["/api/chat", "/api/chat/stream"])
+def test_chat_refuses_a_message_while_a_reply_is_running(
+    client: TestClient,
+    user: User,
+    fake_conversations: FakeConversationStore,
+    fake_turns: FakeTurnStore,
+    fake_runner: FakeTurnRunner,
+    path: str,
+) -> None:
+    conversation = fake_conversations.add(user.id)
+    fake_turns.add(conversation.id, citations=None, steps=[], status="running")
+
+    response = client.post(path, json={"conversation_id": str(conversation.id), "message": "hi"})
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "REPLY_IN_PROGRESS"
+    assert fake_runner.calls == []
+    assert conversation.title is None

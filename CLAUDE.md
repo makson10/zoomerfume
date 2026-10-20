@@ -6,7 +6,7 @@ This file gives Claude Code the project context and operating rules for the Zoom
 
 Zoomerfume is a fictional Ukrainian online perfume shop (prices in UAH). This repository is its AI shop assistant, **Zoomer**: a chat bot that recommends perfumes, compares products, answers shop questions and gives general perfume advice. The goal is a *grounded* assistant: answers about the shop must come from a knowledge base the model searches through tools, with citations, never from the model's memory.
 
-Current state: a web chat with Zoomer on top of a non-streaming chat API. Customers sign in with a phone number and keep several conversations each. The knowledge base (`backend/corpus/`, 96 records) is chunked, embedded and stored in Qdrant by a command-line ingest. Zoomer answers shop questions through two tools, `search_kb` and `open_record`, and cites the records it used as `[KB-042]`; general perfume questions need no tools. The web chat shows citations as chips that open the full record, a step log under each answer and the tool schemas.
+Current state: a web chat with Zoomer on top of a streaming chat API (server-sent events). Customers sign in with a phone number and keep several conversations each. Replies stream in token by token, and the customer can stop one halfway. The knowledge base (`backend/corpus/`, 96 records) is chunked, embedded and stored in Qdrant by a command-line ingest. Zoomer answers shop questions through two tools, `search_kb` and `open_record`, and cites the records it used as `[KB-042]`; general perfume questions need no tools. The web chat shows citations as chips that open the full record, a step log under each answer and the tool schemas.
 
 The repository root is a single git repo. Backend code lives in `backend/` and the web chat in `frontend/`; Docker files, `.env.example` and docs live at the root.
 
@@ -18,11 +18,11 @@ browser ── /api/auth/*, /api/me ──────► api (app/api/auth.py) 
 browser ── /api/conversations/* ──────► api (app/api/conversations.py) ──► Postgres conversations, messages, turns, tool_steps
 browser ── /api/records/{id} ─────────► api (app/api/records.py) ──► Postgres kb_records
 browser ── /api/tools/schema ─────────► api (app/api/tools.py): the tool objects' JSON schemas
-browser ── POST /api/chat ────────────► api (FastAPI, app/api/chat.py)
+browser ── POST /api/chat/stream (SSE) ► api (FastAPI, app/api/chat.py); POST /api/chat: same turn, one JSON reply
                                           │
                                           ├── session cookie ──► user, rate limit, conversation owner check
-                                          ├── TurnStore ─────────► Postgres  turns, tool_steps
-                                          ├── TurnRunner.run() ──► OpenAI Responses API (CHAT_MODEL)
+                                          ├── TurnStore ─────────► Postgres  turns (one running per conversation), tool_steps
+                                          ├── TurnRunner.stream() ► OpenAI Responses API (CHAT_MODEL), streamed
                                           │     ├── search_kb ────► OpenAI embeddings ──► Qdrant kb_chunks
                                           │     └── open_record ──► Postgres  kb_records
                                           ├── history ───────────► Postgres  agent_sessions, agent_messages
@@ -40,7 +40,7 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
 
 - `backend/app/`: the FastAPI application
   - `api/`: HTTP routes (`health.py`, `auth.py`, `conversations.py`, `chat.py`, `records.py`, `tools.py`), route dependencies (`deps.py`), the JSON error body (`errors.py`) and the web chat mount (`spa.py`)
-  - `agent/`: Zoomer's runtime (`runtime.py`), system prompt, per-turn context, the citation check (`citations.py`) and the tools (`tools/`: the envelope and its guard, `search_kb`, `open_record`)
+  - `agent/`: Zoomer's runtime (`runtime.py`), the turn events and their mapping from the SDK's stream (`streaming.py`), system prompt, per-turn context, the citation check (`citations.py`) and the tools (`tools/`: the envelope and its guard, `search_kb`, `open_record`)
   - `core/`: settings, logging setup, phone and name validation (`validators.py`)
   - `db/`: SQLAlchemy engine, models, fail-open write guard, message log
   - `kb/`: the knowledge base: record parsing (`corpus.py`), chunking (`chunking.py`), embeddings, Qdrant storage (`store.py`), the `kb_records` table (`records.py`), search and record lookups for the tools and the API (`knowledge_base.py`), and the command-line tools `ingest`, `search`, `check_corpus` and `eval_rephrase`
@@ -54,14 +54,14 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
 - `backend/pyproject.toml`, `backend/uv.lock`: the uv project (Python 3.12)
 - `frontend/`: the web chat (Vite + React + TypeScript + Mantine)
   - `src/App.tsx`: picks the page: a loader, the sign-in chat or the chat page
-  - `src/api/`: the fetch wrapper (`client.ts`) and one module per API area (`auth.ts`, `conversations.ts`, `chat.ts`, `records.ts`, `tools.ts`)
+  - `src/api/`: the fetch wrapper (`client.ts`), the server-sent event reader (`sse.ts`) and one module per API area (`auth.ts`, `conversations.ts`, `chat.ts`, `records.ts`, `tools.ts`)
   - `src/components/`: `ChatPage` (navbar + chat), `SignInFlow`, `ConversationList`, `ChatPanel` (message list + composer), `Header`, `MessageList`, `MessageBubble`, `MarkdownText`, `CitationChip`, `StepLog`, `RecordDrawer`, `ToolsModal`, `Composer`
-  - `src/hooks/`: `useSession` (the signed-in user) and `useChat` (conversations and the open chat)
+  - `src/hooks/`: `useSession` (the signed-in user) and `useChat` (conversations, the open chat and the streaming reply)
   - `src/theme.ts`: the Mantine theme
   - `public/logo.svg`: the logo, also used as the favicon
 - `.github/workflows/ci.yml`: the CI workflow
 - `docs/retrieval.md`: chunking, the HNSW index and the rephrase check results
-- `docs/architecture.md`: a chat turn: tools, the error envelope, the step cap, citations and what is stored
+- `docs/architecture.md`: a chat turn: streaming, Stop and the one-running-turn lock, tools, the error envelope, the step cap, citations and what is stored
 - Root: `Dockerfile`, `docker-compose.yml`, `docker-compose.override.yml`, `.env.example`, `README.md`
 
 ## Entry Points
@@ -75,8 +75,9 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
   - `POST /api/auth/logout` → 204, the session is cleared
   - `GET /api/me` → `{id, name, phone_masked}`
   - `GET /api/conversations` → `[{id, title}]`, the most recently active first; `POST /api/conversations` → 201 `{id, title: null}`
-  - `GET /api/conversations/{id}/messages` → `[{id, role, content, turn_id, citations, steps}]`, oldest first; `citations` and `steps` are set on Zoomer's replies
-  - `POST /api/chat` `{conversation_id, message}` → `{reply, turn_id, citations: {valid, invalid, missing}, steps: [{step, tool, args, success, code, record_ids, duration_ms}]}`; 422 on invalid input
+  - `GET /api/conversations/{id}/messages` → `[{id, role, content, turn_id, status, citations, steps}]`, oldest first; `status`, `citations` and `steps` are set on Zoomer's replies
+  - `POST /api/chat/stream` `{conversation_id, message}` → server-sent events: `token {text}`, `tool_call {tool, args}`, `tool_result` (a step), then `citation {valid, invalid, missing}` and `done {turn_id, reply, status}`; `error {code, message}` when the turn breaks. Closing the connection stops the turn. 409 `REPLY_IN_PROGRESS` while another reply in the conversation is running; 422 on invalid input
+  - `POST /api/chat` `{conversation_id, message}` → `{turn_id, reply, status, citations: {valid, invalid, missing}, steps: [{step, tool, args, success, code, record_ids, duration_ms}]}`, the same turn in one piece; same errors as the stream
   - `GET /api/records/{id}` → `{id, title, type, updated, header, body}`; 404 `NOT_FOUND`
   - `GET /api/tools/schema` → `[{name, description, parameters, strict}]`, read from the tool objects the agent gets
   - Every `/api/*` route except `/api/auth/*` needs a signed-in user (401 otherwise). Someone else's conversation is a 404. Over a rate limit is a 429 with `Retry-After`. These errors have the body `{"error": {"code", "message"}}`; the `message` is written for the customer.
@@ -105,15 +106,15 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
 
 A chat turn goes through these steps:
 
-1. `POST /api/chat` (`app/api/chat.py`) validates `{conversation_id, message}`. `message` is stripped and 1–4000 characters.
-2. Dependencies run first: `get_current_user` reads the user from the session cookie (401), and `limit_chat` counts the message against the user's rate limit (429). The route then loads the conversation only if it belongs to the user (404), titles it after its first message and moves it to the top of the list.
-3. The route reads the records the tools returned in the conversation's earlier turns (`TurnStore.retrieved_ids()`) and inserts a `running` turn. It gets the `TurnRunner` (`app/agent/runtime.py`) through the `get_turn_runner` dependency (`app/api/deps.py`). `TurnRunner.run()` builds a `TurnContext` with the `KnowledgeBase` and calls `Runner.run` with the runner's `Agent`, whose tools are `search_kb` and `open_record` (`app/agent/tools/`).
+1. `POST /api/chat/stream` (`app/api/chat.py`) validates `{conversation_id, message}`. `message` is stripped and 1–4000 characters. `POST /api/chat` takes the same body and runs the same turn.
+2. Dependencies run first, so their errors are JSON responses before any event is sent: `get_current_user` reads the user from the session cookie (401), and `limit_chat` counts the message against the user's rate limit (429). `start_turn` then loads the conversation only if it belongs to the user (404), reads the records the tools returned in its earlier turns with `TurnStore.retrieved_ids()`, and starts a `running` turn with `TurnStore.start()`. A partial unique index (migration `0005`) allows one running turn per conversation, so a second message while Zoomer is still answering gets a 409. `start()` first marks running turns older than two minutes as `failed`, so a server that died mid-turn can't block a conversation. Then the conversation is titled after its first message and moved to the top of the list. The reads come first and both writes commit, so the request's session holds no open transaction while the turn runs. An open one would keep a pooled connection busy for the whole reply, and `finished_at` (Postgres `now()`, the transaction's start time) would show when the turn began.
+3. The route gets the `TurnRunner` (`app/agent/runtime.py`) through the `get_turn_runner` dependency (`app/api/deps.py`). `TurnRunner.stream()` builds a `TurnContext` with the `KnowledgeBase` and calls `Runner.run_streamed` with the runner's `Agent`, whose tools are `search_kb` and `open_record` (`app/agent/tools/`). `agent_events()` (`app/agent/streaming.py`) turns the SDK's stream into `Token`, `ToolCall` and `Step` events; a tool's result is the `Step` its guard recorded. The stream route sends them as SSE frames through FastAPI's `EventSourceResponse`, which also sends a `: ping` comment every 15 seconds of silence. `/api/chat` reads the stream to its end and returns the last event.
 4. The agent's instructions are the static `AGENT_INSTRUCTIONS` (`app/agent/prompts.py`) plus the current date and time in UTC and the customer's name, recomputed on every run.
 5. History comes from the SDK's `SQLAlchemySession` on the app's engine, with the conversation id as the session id. Its tables `agent_sessions` and `agent_messages` are created by migration `0004`, not by the SDK. The model sees only the last `HISTORY_WINDOW_TURNS` user turns (`window_history()`, the run's `session_input_callback`); stored rows are never deleted. The window cuts only on turn boundaries, so a tool call is never separated from its output.
 6. Every request carries `prompt_cache_key = conversation:<conversation_id>`, and the run is capped at `AGENT_MAX_TURNS` (5) model calls. A run that needs more ends with `MAX_STEPS_TEXT` through the SDK's `max_turns` error handler, and the turn status is `max_steps`.
-7. Any runtime error, or an empty answer, becomes `FALLBACK_TEXT`, and the turn status is `failed`. The endpoint still answers 200.
-8. When `MESSAGE_LOG_ENABLED=true`, `record_turn_messages()` writes the user row and the assistant row to the `messages` table through `pg_guard`. Both rows point to the turn.
-9. For an `ok` turn, `check_citations()` (`app/agent/citations.py`) sorts the reply's `[KB-042]` citations into valid ones (a tool returned the record in this conversation) and invalid ones, and sets `missing` when this turn retrieved records but the reply cites none of them. A `failed` or `max_steps` turn gets empty citations, because its fixed text cites nothing. `TurnStore.finish()` stores the status, the citations and the tool steps, and the response returns them.
+7. Any runtime error, or an empty answer, becomes `FALLBACK_TEXT`, and the turn status is `failed`. The turn still ends normally with a reply. These fixed texts are never streamed as tokens, so the final `done` event carries the stored reply and the web chat shows it in place of the streamed text.
+8. For an `ok` turn, `check_citations()` (`app/agent/citations.py`) sorts the reply's `[KB-042]` citations into valid ones (a tool returned the record in this conversation) and invalid ones, and sets `missing` when this turn retrieved records but the reply cites none of them. Other turns get empty citations, because their texts cite nothing or are unfinished. When `MESSAGE_LOG_ENABLED=true`, `record_turn_messages()` writes the user row and the assistant row to the `messages` table through `pg_guard`. `TurnStore.finish()` stores the status, the citations and the tool steps, and the stream ends with `citation` and `done`.
+9. When the client closes the connection (the Stop button, logging out or a closed tab), FastAPI cancels the stream. `TurnRunner.stream()` cancels the SDK run and stores the turn as `cancelled` with its tool steps. The reply written so far goes to the message log and into the agent history as an assistant message, so Zoomer knows what it already said; a turn stopped before any text has no reply row. Those writes run in a cancelled task, so they sit in a shielded `anyio` scope limited to `WRITE_TIMEOUT_S`. Any other exception after the stream started ends it with an `error` event.
 
 **Tools.** Each tool is a `function_tool` wrapped in `tool_guard` (`app/agent/tools/envelope.py`). The tool returns a `ToolResult` (data and record ids) or raises `ToolError(code, message)`; the guard turns either one into the JSON envelope `{success: true, data}` or `{success: false, code, message}`, so a tool never raises. Any other exception becomes `UPSTREAM_ERROR` with a fixed message, and the exception text goes only to the log. The guard also appends a `Step` (tool, args, success, code, record ids, duration) to `TurnContext.steps`. Tools reach the knowledge base through `TurnContext.kb`, the `KnowledgeBase` (`app/kb/knowledge_base.py`) built in the lifespan; `GET /api/records/{id}` uses the same object. The SDK builds strict schemas from the signatures and docstrings: every property is required (optional ones are nullable) and `additionalProperties` is false. Details: `docs/architecture.md`.
 
@@ -133,7 +134,7 @@ A chat turn goes through these steps:
 
 **Migrations.** The container entrypoint runs `alembic upgrade head` before it starts uvicorn. `alembic/env.py` reads the DSN from the app settings, so the database URL is defined in exactly one place.
 
-**Web chat.** A single page with no router and no state library. On load, `useSession` calls `/api/me`; a 401 shows `SignInFlow`, where Zoomer asks for the phone and then the name as chat bubbles. Zoomer's first question is in the frontend, and every later line comes from the API's `message`. When signed in, `ChatPage` remounts per user. `useChat` loads the conversation list, opens the most recent conversation with its transcript, and keeps the rest in React state. "New chat" only clears the view: the first message creates the conversation, so the list never fills with empty chats. Sending and switching chats are blocked while a request is pending. API errors with a code show their `message` (a rate limit, for example); other failures show a generic line. All requests go through `src/api/client.ts`. Assistant replies render as Markdown through `MarkdownText` (GFM tables included, raw HTML is not rendered); user messages render as plain text. In a reply, each `[KB-042]` citation becomes a `CitationChip` (red when invalid), with a "Sources" row of the valid ones under the bubble; a chip opens `RecordDrawer` with the full record from `/api/records/{id}`. `StepLog` under each reply lists the tool calls (collapsed) or says "No tools used", and flags invalid or missing citations. The header's Tools button opens `ToolsModal` with the tool schemas. On phones, Tools and Log out are icon buttons, so the header fits. The color scheme follows the system, and the header toggle overrides it. Keep the UI minimal and functional: stock Mantine components and the theme in `theme.ts`. In development the Vite dev server proxies `/api` to `localhost:8000`, so the browser never needs CORS. In the image, the first Docker stage builds the frontend and the runtime stage copies `frontend/dist` to `/app/static`.
+**Web chat.** A single page with no router and no state library. On load, `useSession` calls `/api/me`; a 401 shows `SignInFlow`, where Zoomer asks for the phone and then the name as chat bubbles. Zoomer's first question is in the frontend, and every later line comes from the API's `message`. When signed in, `ChatPage` remounts per user. `useChat` loads the conversation list, opens the most recent conversation with its transcript, and keeps the rest in React state. "New chat" only clears the view: the first message creates the conversation, so the list never fills with empty chats. Replies stream in: `useChat` reads `/api/chat/stream` through `src/api/sse.ts`, which buffers network chunks into events and skips the keep-alive pings. The reply bubble shows a loader and the tool Zoomer is using until the first token arrives, and `done` replaces the streamed text with the stored reply. While a reply streams, the composer's Send button turns into Stop, which aborts the request; the partial reply stays with a "Stopped" note, as it does after a reload. `useChat` also aborts the request when it unmounts (on log out, for example), so the turn stops instead of running on in the background. Sending and switching chats are blocked while a reply streams or a transcript loads. API errors with a code show their `message` (a rate limit, or a 409 from a second tab, for example); other failures show a generic line. All requests go through `src/api/client.ts`. The composer keeps its own draft and `MessageBubble` is memoized, so typing and streamed tokens re-render only the parts that changed. Assistant replies render as Markdown through `MarkdownText` (GFM tables included, raw HTML is not rendered); user messages render as plain text. In a reply, each `[KB-042]` citation becomes a `CitationChip` (red when invalid), with a "Sources" row of the valid ones under the bubble; a chip opens `RecordDrawer` with the full record from `/api/records/{id}`. `StepLog` under each reply lists the tool calls (collapsed) or says "No tools used", and flags invalid or missing citations. The header's Tools button opens `ToolsModal` with the tool schemas. On phones, Tools and Log out are icon buttons, so the header fits. The color scheme follows the system, and the header toggle overrides it. Keep the UI minimal and functional: stock Mantine components and the theme in `theme.ts`. In development the Vite dev server proxies `/api` to `localhost:8000`, so the browser never needs CORS. In the image, the first Docker stage builds the frontend and the runtime stage copies `frontend/dist` to `/app/static`.
 
 ## Tests
 
@@ -141,8 +142,9 @@ Unit tests live in `backend/tests/` and run with pytest (`asyncio_mode = "auto"`
 
 - `conftest.py` builds `Settings` in code with `_env_file=None`, so a real key in `.env` is never read.
 - The `client` fixture overrides `get_turn_runner`, `get_user_store`, `get_conversation_store`, `get_rate_limiter`, `get_turn_store` and `get_knowledge_base` with in-memory fakes from `tests/fakes.py`, and uses `TestClient` without `with`, so the lifespan never runs and nothing touches Postgres. The client keeps cookies, so the `user` fixture signs in through `/api/auth/phone` like a browser.
-- The fakes don't run SQL. The upserts in `UserStore` and `RateLimiter` and the queries in `TurnStore` are checked against a real database in the smoke checks.
-- Runtime tests run the real agent loop on the SDK's `ScriptedModel` (`agents.testing`), with in-memory history and a fake knowledge base. Tool tests call each tool through `on_invoke_tool`, the way the agent loop does.
+- The fakes don't run SQL. The upserts in `UserStore` and `RateLimiter` and the queries in `TurnStore` (including the one-running-turn lock) are checked against a real database in the smoke checks.
+- Runtime tests stream the real agent loop on the SDK's `ScriptedModel` (`agents.testing`), with in-memory history, a fake knowledge base and a fake turn store; the Stop test closes the stream while a tool is still running. Tool tests call each tool through `on_invoke_tool`, the way the agent loop does.
+- Chat API tests run both endpoints on a `FakeTurnRunner` that streams canned events, and read the stream route's server-sent events from the response body.
 - Web chat tests mount a tiny fake build from a temporary directory.
 - Knowledge base tests cover header parsing, the corpus checks (including a run over the shipped `backend/corpus/`), chunk limits, overlap and breadcrumbs, point ids and search filters. `tiktoken` downloads the `cl100k_base` encoding on first use and caches it, so the first chunking test needs network access.
 
@@ -191,8 +193,10 @@ curl -c jar -b jar -X POST localhost:8000/api/auth/create \
 curl -b jar -X POST localhost:8000/api/conversations          # → {"id": "<uuid>", ...}
 curl -b jar -X POST localhost:8000/api/chat \
   -H 'content-type: application/json' -d '{"conversation_id": "<uuid>", "message": "hi"}'
-curl -b jar -X POST localhost:8000/api/chat \
+curl -N -b jar -X POST localhost:8000/api/chat/stream \
   -H 'content-type: application/json' -d '{"conversation_id": "<uuid>", "message": "vanilla and tobacco under 3000 UAH?"}'
+# while that one streams, a second message to the same conversation gets a 409;
+# curl --max-time 3 on a long question stops it halfway (turn status cancelled)
 curl -b jar localhost:8000/api/records/KB-026      # a cited record
 curl -b jar localhost:8000/api/tools/schema        # the tool schemas
 docker compose exec postgres psql -U zoomer -d zoomerfume \

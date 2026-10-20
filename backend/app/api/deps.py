@@ -60,6 +60,7 @@ AppSettings = Annotated[Settings, Depends(get_app_settings)]
 Conversations = Annotated[ConversationStore, Depends(get_conversation_store)]
 Knowledge = Annotated[KnowledgeBase, Depends(get_knowledge_base)]
 Limiter = Annotated[RateLimiter, Depends(get_rate_limiter)]
+Runtime = Annotated[TurnRunner, Depends(get_turn_runner)]
 Turns = Annotated[TurnStore, Depends(get_turn_store)]
 Users = Annotated[UserStore, Depends(get_user_store)]
 

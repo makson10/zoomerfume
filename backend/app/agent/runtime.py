@@ -1,17 +1,22 @@
 """OpenAI Agents SDK runtime.
 
-Owns :class:`TurnRunner`, which produces Zoomer's reply for a single user message.
-Each conversation's history lives in Postgres, in an SDK ``SQLAlchemySession``.
+Owns :class:`TurnRunner`, which runs one turn: Zoomer's streamed reply to a single
+user message. Each conversation's history lives in Postgres, in an SDK
+``SQLAlchemySession``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
+from typing import TYPE_CHECKING
 
+import anyio
 from agents import (
     Agent,
     ModelSettings,
@@ -24,14 +29,21 @@ from agents import (
 from agents.extensions.memory import SQLAlchemySession
 from agents.items import TResponseInputItem
 from openai.types.shared import Reasoning
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from app.agent.citations import Citations, check_citations
 from app.agent.context import Step, TurnContext, TurnStatus
 from app.agent.prompts import AGENT_INSTRUCTIONS
+from app.agent.streaming import Token, TurnEvent, agent_events
 from app.agent.tools import TOOLS
 from app.core.config import Settings
+from app.db.guard import WRITE_TIMEOUT_S
 from app.db.message_log import record_turn_messages
 from app.kb.knowledge_base import KnowledgeBase
+
+if TYPE_CHECKING:
+    from app.services.turns import TurnStore
 
 logger = logging.getLogger(__name__)
 
@@ -117,21 +129,30 @@ def window_history(
 
 
 @dataclass(frozen=True)
-class TurnResult:
-    """What one turn produced: the reply, how the run ended and the tool calls it made."""
+class NewTurn:
+    """A customer's message and the running turn started for it."""
 
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    user_name: str
+    message: str
+    # The records the tools returned in the conversation's earlier turns.
+    retrieved_before: set[str]
+
+
+class TurnResult(BaseModel):
+    """Zoomer's reply to one message, with how the turn ended, its checked citations and
+    the tool calls behind it."""
+
+    turn_id: uuid.UUID
     reply: str
     status: TurnStatus
+    citations: Citations
     steps: list[Step]
-
-    @property
-    def retrieved_ids(self) -> set[str]:
-        """The records this turn's tools returned."""
-        return {record_id for step in self.steps for record_id in step.record_ids}
 
 
 class TurnRunner:
-    """Produces Zoomer's reply for one user message and logs the exchange.
+    """Runs Zoomer's turns and stores how they end.
 
     Created once in the app lifespan and handed to routes through the
     ``get_turn_runner`` dependency.
@@ -153,51 +174,92 @@ class TurnRunner:
         )
         logger.info("Agent created | model=%s", settings.chat_model)
 
-    async def run(
-        self, turn_id: uuid.UUID, conversation_id: uuid.UUID, user_name: str, text: str
-    ) -> TurnResult:
-        """Run one user turn and return Zoomer's reply with the turn's status and steps.
+    async def stream(
+        self, turn: NewTurn, turns: TurnStore
+    ) -> AsyncIterator[TurnEvent | TurnResult]:
+        """Run one turn and yield its events as they happen, then its :class:`TurnResult`.
 
         Any runtime error degrades to :data:`FALLBACK_TEXT`, and a run that hits
         ``AGENT_MAX_TURNS`` ends with :data:`MAX_STEPS_TEXT`, so the chat never goes
-        silent. The exchange is written to the message log after the run.
+        silent. Only an answer that finished normally gets its citations checked,
+        because those fixed texts cite nothing. The exchange goes to the message log,
+        and the turn is stored with its status, citations and tool steps.
+
+        Closing the stream early (the customer pressed Stop or left) cancels the run.
+        The turn is stored as ``cancelled``, and the reply so far is kept in the
+        conversation's history and in the message log, so Zoomer knows what it already
+        said.
 
         Args:
-            turn_id: The turn's row in ``turns``.
-            conversation_id: The conversation the turn belongs to. It is also the
-                SDK session id, so each conversation has its own history.
-            user_name: The signed-in customer's name, for the instructions.
-            text: The customer's message.
+            turn: The turn to run. The conversation id is also the SDK session id, so
+                each conversation has its own history.
+            turns: Where the turn is stored when it ends.
         """
         ctx = TurnContext(
-            conversation_id=conversation_id,
-            user_name=user_name,
-            turn_id=turn_id,
-            user_message=text.strip(),
+            conversation_id=turn.conversation_id,
+            user_name=turn.user_name,
+            turn_id=turn.id,
+            user_message=turn.message.strip(),
             kb=self._kb,
         )
-
+        session = self._session(turn.conversation_id)
+        result = Runner.run_streamed(
+            self.agent,
+            ctx.user_message,
+            session=session,
+            context=ctx,
+            max_turns=self._settings.agent_max_turns,
+            run_config=self._run_config(turn.conversation_id),
+            error_handlers={"max_turns": self._out_of_steps},
+        )
+        streamed = ""
         try:
-            result = await Runner.run(
-                self.agent,
-                ctx.user_message,
-                session=self._session(conversation_id),
-                context=ctx,
-                max_turns=self._settings.agent_max_turns,
-                run_config=self._run_config(conversation_id),
-                error_handlers={"max_turns": self._out_of_steps},
-            )
+            async for event in agent_events(result, ctx.steps):
+                if isinstance(event, Token):
+                    streamed += event.text
+                yield event
             reply = (result.final_output or "").strip()
         except Exception:
-            logger.exception("agent run failed | conversation=%s", conversation_id)
+            logger.exception("agent run failed | conversation=%s", turn.conversation_id)
             reply = ""
+        except (asyncio.CancelledError, GeneratorExit):
+            result.cancel()
+            # The stream is being cancelled, so the writes need a shield and a time limit.
+            with anyio.move_on_after(WRITE_TIMEOUT_S, shield=True):
+                await self._store_stopped_turn(ctx, session, turns, streamed.strip())
+            raise
 
         if not reply:
             ctx.status = "failed"
             reply = FALLBACK_TEXT
+        citations = Citations()
+        if ctx.status == "ok":
+            citations = check_citations(reply, ctx.retrieved_ids, turn.retrieved_before)
         if self._settings.message_log_enabled:
             await record_turn_messages(self._sessionmaker, ctx, reply)
-        return TurnResult(reply=reply, status=ctx.status, steps=ctx.steps)
+        await turns.finish(turn.id, ctx.status, citations, ctx.steps)
+        yield TurnResult(
+            turn_id=turn.id, reply=reply, status=ctx.status, citations=citations, steps=ctx.steps
+        )
+
+    async def _store_stopped_turn(
+        self, ctx: TurnContext, session: SQLAlchemySession, turns: TurnStore, reply: str
+    ) -> None:
+        """Store a stopped turn with its tool steps, and keep the reply it wrote so far."""
+        logger.info(
+            "turn stopped | conversation=%s steps=%d chars=%d",
+            ctx.conversation_id,
+            len(ctx.steps),
+            len(reply),
+        )
+        try:
+            await turns.finish(ctx.turn_id, "cancelled", Citations(), ctx.steps)
+            if reply:
+                await session.add_items([{"role": "assistant", "content": reply}])
+        except Exception:
+            logger.exception("stopped turn not stored | conversation=%s", ctx.conversation_id)
+        if self._settings.message_log_enabled:
+            await record_turn_messages(self._sessionmaker, ctx, reply)
 
     def _out_of_steps(self, data: RunErrorHandlerInput[TurnContext]) -> RunErrorHandlerResult:
         """End a run that hit the step limit with a polite answer instead of an error."""

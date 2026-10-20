@@ -103,7 +103,7 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
         <ConversationList
           conversations={chat.conversations}
           activeId={chat.activeId}
-          disabled={chat.loading}
+          disabled={chat.loading || chat.streaming}
           onSelect={openConversation}
           onNewChat={newChat}
         />
@@ -112,12 +112,14 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
         <ChatPanel
           messages={chat.messages}
           loading={chat.loading}
+          streaming={chat.streaming}
           error={chat.error}
           emptyText={
             greeting ??
             `Hi, ${user.name}! Ask me about our perfumes, prices, delivery or returns, or anything about perfume.`
           }
           onSend={(text) => void chat.send(text)}
+          onStop={chat.stop}
           onOpenRecord={setRecordId}
         />
       </AppShell.Main>

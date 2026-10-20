@@ -1,10 +1,11 @@
 [project]
 name = "zoomerfume-backend"
-version = "0.2.0"
+version = "0.3.0"
 description = "Zoomerfume shop assistant: FastAPI backend with an OpenAI Agents SDK chat agent"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "alembic>=1.20.0",
+    "anyio>=4.15.1",
     "asyncpg>=0.31.0",
     "fastapi>=0.141.1",
     "itsdangerous>=2.2.0",

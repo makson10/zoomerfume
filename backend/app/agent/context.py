@@ -11,8 +11,9 @@ from pydantic import BaseModel, ConfigDict
 if TYPE_CHECKING:
     from app.kb.knowledge_base import KnowledgeBase
 
-# How a turn ended: an answer, the polite answer at the step limit, or the fallback text.
-TurnStatus = Literal["ok", "max_steps", "failed"]
+# How a turn ended: an answer, the polite answer at the step limit, stopped by the
+# customer, or the fallback text.
+TurnStatus = Literal["ok", "max_steps", "cancelled", "failed"]
 
 
 class Step(BaseModel):
@@ -47,3 +48,8 @@ class TurnContext:
     # The tool calls of this turn, in the order they finished.
     steps: list[Step] = field(default_factory=list)
     status: TurnStatus = "ok"
+
+    @property
+    def retrieved_ids(self) -> set[str]:
+        """The records this turn's tools returned."""
+        return {record_id for step in self.steps for record_id in step.record_ids}

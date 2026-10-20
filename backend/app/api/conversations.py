@@ -30,7 +30,8 @@ class ConversationOut(BaseModel):
 class MessageOut(BaseModel):
     """One logged message of a conversation's transcript.
 
-    Zoomer's replies also carry their checked citations and the tool calls behind them.
+    Zoomer's replies also carry how their turn ended, their checked citations and the tool
+    calls behind them.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -39,6 +40,8 @@ class MessageOut(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     turn_id: uuid.UUID | None
+    # The turn's status, e.g. "cancelled" for a reply the customer stopped.
+    status: str | None = None
     citations: Citations | None = None
     steps: list[Step] = []
 
@@ -78,6 +81,7 @@ async def create_conversation(user: CurrentUser, conversations: Conversations) -
 def _message_out(message: Message, turn: Turn | None) -> MessageOut:
     out = MessageOut.model_validate(message)
     if message.role == "assistant" and turn is not None:
+        out.status = turn.status
         if turn.citations is not None:
             out.citations = Citations.model_validate(turn.citations)
         out.steps = [Step.model_validate(step) for step in turn.steps]
