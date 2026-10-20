@@ -1,23 +1,10 @@
-import type { Citations, Step, TurnStatus } from './chat.ts'
 import { getJson, postJson } from './client.ts'
+import type { ConversationOut, MessageOut } from './schema.d.ts'
 
-export interface Conversation {
-  id: string
-  /** Empty until the first message. */
-  title: string | null
-}
+export type Conversation = ConversationOut
 
-export interface StoredMessage {
-  id: number
-  role: 'user' | 'assistant'
-  content: string
-  turn_id: string | null
-  /** How the reply's turn ended. Set on Zoomer's replies that have a recorded turn. */
-  status: TurnStatus | null
-  /** Set on Zoomer's replies that have a recorded turn. */
-  citations: Citations | null
-  steps: Step[]
-}
+/** One message of a conversation's transcript. */
+export type StoredMessage = MessageOut
 
 /** The signed-in user's conversations, the most recently active first. */
 export function listConversations(): Promise<Conversation[]> {
