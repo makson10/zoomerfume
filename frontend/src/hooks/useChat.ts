@@ -140,6 +140,7 @@ export function useChat() {
         switch (chatEvent.event) {
           case 'start':
             setActiveId(chatEvent.data.conversation_id)
+            listConversations().then(setConversations, () => undefined)
             break
           case 'token':
             updateReply((reply) => ({
@@ -194,7 +195,6 @@ export function useChat() {
     } finally {
       replyRequest.current = null
       setStreaming(false)
-      listConversations().then(setConversations, () => undefined)
     }
   }
 
