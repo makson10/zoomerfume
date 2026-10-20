@@ -6,22 +6,27 @@ import { MessageList } from './MessageList.tsx'
 interface ChatPanelProps {
   messages: ChatMessage[]
   loading: boolean
+  /** A reply is streaming in: the composer offers Stop instead of Send. */
+  streaming?: boolean
   error: string | null
   emptyText?: string
   placeholder?: string
   onSend: (text: string) => void
+  onStop?: () => void
   /** Opens a cited record. Without it, citations stay plain text. */
   onOpenRecord?: (recordId: string) => void
 }
 
-/** The message list with the composer under it. Sending is blocked while loading. */
+/** The message list with the composer under it. Sending is blocked while loading or streaming. */
 export function ChatPanel({
   messages,
   loading,
+  streaming = false,
   error,
   emptyText,
   placeholder,
   onSend,
+  onStop,
   onOpenRecord,
 }: ChatPanelProps) {
   return (
@@ -39,7 +44,12 @@ export function ChatPanel({
           onOpenRecord={onOpenRecord}
         />
       </ScrollArea>
-      <Composer onSend={onSend} disabled={loading} placeholder={placeholder} />
+      <Composer
+        onSend={onSend}
+        onStop={streaming ? onStop : undefined}
+        disabled={loading || streaming}
+        placeholder={placeholder}
+      />
     </Container>
   )
 }

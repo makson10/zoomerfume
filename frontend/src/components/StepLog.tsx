@@ -6,6 +6,8 @@ import type { Citations, Step } from '../api/chat.ts'
 interface StepLogProps {
   steps: Step[]
   citations: Citations
+  /** The customer stopped this answer. */
+  stopped?: boolean
 }
 
 function formatArgs(args: Record<string, unknown>): string {
@@ -34,9 +36,20 @@ function StepRow({ step }: { step: Step }) {
   )
 }
 
-function CitationWarnings({ citations }: { citations: Citations }) {
+function Notes({
+  citations,
+  stopped,
+}: {
+  citations: Citations
+  stopped: boolean
+}) {
   return (
     <>
+      {stopped && (
+        <Text size="xs" c="dimmed">
+          Stopped
+        </Text>
+      )}
       {citations.invalid.length > 0 && (
         <Text size="xs" c="red">
           Cites records no tool returned: {citations.invalid.join(', ')}
@@ -51,8 +64,11 @@ function CitationWarnings({ citations }: { citations: Citations }) {
   )
 }
 
-/** The tools Zoomer used for one answer, collapsed by default, and any citation problems. */
-export function StepLog({ steps, citations }: StepLogProps) {
+/**
+ * The tools Zoomer used for one answer, collapsed by default, plus a note when the
+ * answer was stopped and any citation problems.
+ */
+export function StepLog({ steps, citations, stopped = false }: StepLogProps) {
   const [opened, { toggle }] = useDisclosure(false)
 
   if (steps.length === 0) {
@@ -61,7 +77,7 @@ export function StepLog({ steps, citations }: StepLogProps) {
         <Text size="xs" c="dimmed">
           No tools used
         </Text>
-        <CitationWarnings citations={citations} />
+        <Notes citations={citations} stopped={stopped} />
       </Stack>
     )
   }
@@ -86,7 +102,7 @@ export function StepLog({ steps, citations }: StepLogProps) {
           ))}
         </Stack>
       </Collapse>
-      <CitationWarnings citations={citations} />
+      <Notes citations={citations} stopped={stopped} />
     </Stack>
   )
 }
