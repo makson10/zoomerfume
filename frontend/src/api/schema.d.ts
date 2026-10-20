@@ -120,11 +120,7 @@ export interface paths {
      */
     get: operations['list_conversations_api_conversations_get']
     put?: never
-    /**
-     * Create Conversation
-     * @description Start an empty conversation.
-     */
-    post: operations['create_conversation_api_conversations_post']
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -165,7 +161,8 @@ export interface paths {
     put?: never
     /**
      * Chat
-     * @description Return Zoomer's reply to one message in one of the user's conversations.
+     * @description Return Zoomer's reply to one message in one of the user's conversations, or in a
+     *     new one.
      *
      *     It runs the same turn as ``/api/chat/stream`` and returns the stream's last event.
      *
@@ -193,7 +190,9 @@ export interface paths {
      * Chat Stream
      * @description Stream Zoomer's reply to one message as server-sent events.
      *
-     *     ``token`` events carry the reply as the model writes it, and each tool call sends
+     *     ``start`` names the conversation and the turn, which is how the web chat learns the id
+     *     of a new conversation. ``token`` events carry the reply as the model writes it, and each
+     *     tool call sends
      *     ``tool_call`` and then ``tool_result`` with its step. The stream ends with
      *     ``citation`` and ``done``. ``done`` carries the stored reply, which replaces the
      *     streamed text, because the fallback and step-limit texts are never streamed.
@@ -261,11 +260,8 @@ export interface components {
   schemas: {
     /** ChatRequest */
     ChatRequest: {
-      /**
-       * Conversation Id
-       * Format: uuid
-       */
-      conversation_id: string
+      /** Conversation Id */
+      conversation_id?: string | null
       /** Message */
       message: string
     }
@@ -294,7 +290,7 @@ export interface components {
     }
     /**
      * ConversationOut
-     * @description A conversation in the list. ``title`` is empty until the first message.
+     * @description A conversation in the list, titled after its first message.
      */
     ConversationOut: {
       /**
@@ -303,7 +299,7 @@ export interface components {
        */
       id: string
       /** Title */
-      title: string | null
+      title: string
     }
     /** CreateUserRequest */
     CreateUserRequest: {
@@ -506,6 +502,11 @@ export interface components {
      */
     TurnResult: {
       /**
+       * Conversation Id
+       * Format: uuid
+       */
+      conversation_id: string
+      /**
        * Turn Id
        * Format: uuid
        */
@@ -520,6 +521,22 @@ export interface components {
       citations: components['schemas']['Citations']
       /** Steps */
       steps: components['schemas']['Step'][]
+    }
+    /**
+     * TurnStart
+     * @description The first event of a turn: the conversation and the turn the reply belongs to.
+     */
+    TurnStart: {
+      /**
+       * Conversation Id
+       * Format: uuid
+       */
+      conversation_id: string
+      /**
+       * Turn Id
+       * Format: uuid
+       */
+      turn_id: string
     }
     /**
      * UserOut
@@ -561,6 +578,7 @@ export type ToolCall = components['schemas']['ToolCall']
 export type ToolSchema = components['schemas']['ToolSchema']
 export type TurnDone = components['schemas']['TurnDone']
 export type TurnResult = components['schemas']['TurnResult']
+export type TurnStart = components['schemas']['TurnStart']
 export type UserOut = components['schemas']['UserOut']
 export type $defs = Record<string, never>
 export interface operations {
@@ -735,35 +753,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ConversationOut'][]
-        }
-      }
-      /** @description Client Error */
-      '4XX': {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ErrorBody']
-        }
-      }
-    }
-  }
-  create_conversation_api_conversations_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      201: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ConversationOut']
         }
       }
       /** @description Client Error */

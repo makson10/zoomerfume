@@ -1,4 +1,4 @@
-import { getJson, postJson } from './client.ts'
+import { getJson } from './client.ts'
 import type { ConversationOut, MessageOut } from './schema.d.ts'
 
 export type Conversation = ConversationOut
@@ -9,10 +9,6 @@ export type StoredMessage = MessageOut
 /** The signed-in user's conversations, the most recently active first. */
 export function listConversations(): Promise<Conversation[]> {
   return getJson<Conversation[]>('/api/conversations')
-}
-
-export function createConversation(): Promise<Conversation> {
-  return postJson<Conversation>('/api/conversations')
 }
 
 /** A conversation's transcript, oldest first. */

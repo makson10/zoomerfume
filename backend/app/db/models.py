@@ -48,8 +48,8 @@ class Conversation(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    # The first user message, shortened. Empty until the first message.
-    title: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # The first user message, shortened.
+    title: Mapped[str] = mapped_column(String(80), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

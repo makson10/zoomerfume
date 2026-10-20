@@ -15,6 +15,7 @@ from app.agent.runtime import (
     MAX_STEPS_TEXT,
     NewTurn,
     TurnRunner,
+    TurnStart,
     window_history,
 )
 from app.agent.streaming import Token, ToolCall
@@ -131,8 +132,9 @@ async def test_turn_runner_streams_a_tool_call_and_checks_citations(
     runner.agent.model = model
     turn = await _start(fake_turns, "something vanilla?", retrieved_before={"KB-012"})
 
-    tool_call, step, token, result = await _run(runner, fake_turns, turn)
+    start, tool_call, step, token, result = await _run(runner, fake_turns, turn)
 
+    assert start == TurnStart(conversation_id=turn.conversation_id, turn_id=turn.id)
     assert tool_call == ToolCall(tool="search_kb", args=SEARCH_ARGS)
     assert (step.tool, step.record_ids) == ("search_kb", ["KB-031"])
     assert token == Token(text=reply)
@@ -175,10 +177,10 @@ async def test_a_stopped_turn_keeps_the_reply_so_far(
     turn = await _start(fake_turns, "something vanilla?")
 
     events = runner.stream(turn, fake_turns)
-    seen = [await anext(events), await anext(events)]
+    seen = [await anext(events) for _ in range(3)]
     await events.aclose()
 
-    assert seen == [Token(text=preamble), ToolCall(tool="search_kb", args=SEARCH_ARGS)]
+    assert seen[1:] == [Token(text=preamble), ToolCall(tool="search_kb", args=SEARCH_ARGS)]
     assert fake_turns.turns[turn.id].status == "cancelled"
     items = await history[str(turn.conversation_id)].get_items()
     assert [(item["role"], item["content"]) for item in items] == [

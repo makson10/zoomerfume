@@ -7,6 +7,7 @@ import type {
   Token,
   ToolCall,
   TurnDone,
+  TurnStart,
 } from './schema.d.ts'
 import { readEvents } from './sse.ts'
 
@@ -17,6 +18,8 @@ export type TurnStatus = 'running' | TurnDone['status']
 
 /** The events of a streamed reply, in the order the server sends them. */
 export type ChatEvent =
+  /** The conversation and the turn, so a new chat learns its id. */
+  | { event: 'start'; data: TurnStart }
   | { event: 'token'; data: Token }
   | { event: 'tool_call'; data: ToolCall }
   | { event: 'tool_result'; data: Step }
@@ -26,11 +29,12 @@ export type ChatEvent =
   | { event: 'error'; data: ErrorDetail }
 
 /**
- * Send one message to Zoomer in a conversation and yield the reply's events as they
- * arrive. Aborting `signal` closes the stream, and the server stops the turn.
+ * Send one message to Zoomer and yield the reply's events as they arrive. Without a
+ * conversation id, the message starts a new conversation. Aborting `signal` closes
+ * the stream, and the server stops the turn.
  */
 export async function* streamMessage(
-  conversationId: string,
+  conversationId: string | null,
   message: string,
   signal: AbortSignal,
 ): AsyncGenerator<ChatEvent> {

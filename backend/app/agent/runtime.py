@@ -140,10 +140,18 @@ class NewTurn:
     retrieved_before: set[str]
 
 
+class TurnStart(BaseModel):
+    """The first event of a turn: the conversation and the turn the reply belongs to."""
+
+    conversation_id: uuid.UUID
+    turn_id: uuid.UUID
+
+
 class TurnResult(BaseModel):
     """Zoomer's reply to one message, with how the turn ended, its checked citations and
     the tool calls behind it."""
 
+    conversation_id: uuid.UUID
     turn_id: uuid.UUID
     reply: str
     status: TurnStatus
@@ -176,8 +184,9 @@ class TurnRunner:
 
     async def stream(
         self, turn: NewTurn, turns: TurnStore
-    ) -> AsyncIterator[TurnEvent | TurnResult]:
-        """Run one turn and yield its events as they happen, then its :class:`TurnResult`.
+    ) -> AsyncIterator[TurnStart | TurnEvent | TurnResult]:
+        """Run one turn: yield a :class:`TurnStart`, its events as they happen, then its
+        :class:`TurnResult`.
 
         Any runtime error degrades to :data:`FALLBACK_TEXT`, and a run that hits
         ``AGENT_MAX_TURNS`` ends with :data:`MAX_STEPS_TEXT`, so the chat never goes
@@ -214,6 +223,7 @@ class TurnRunner:
         )
         streamed = ""
         try:
+            yield TurnStart(conversation_id=turn.conversation_id, turn_id=turn.id)
             async for event in agent_events(result, ctx.steps):
                 if isinstance(event, Token):
                     streamed += event.text
@@ -239,7 +249,12 @@ class TurnRunner:
             await record_turn_messages(self._sessionmaker, ctx, reply)
         await turns.finish(turn.id, ctx.status, citations, ctx.steps)
         yield TurnResult(
-            turn_id=turn.id, reply=reply, status=ctx.status, citations=citations, steps=ctx.steps
+            conversation_id=turn.conversation_id,
+            turn_id=turn.id,
+            reply=reply,
+            status=ctx.status,
+            citations=citations,
+            steps=ctx.steps,
         )
 
     async def _store_stopped_turn(

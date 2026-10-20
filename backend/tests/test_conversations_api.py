@@ -13,14 +13,16 @@ def test_lists_own_conversations_most_recent_first(
     fake_users: FakeUserStore,
     fake_conversations: FakeConversationStore,
 ) -> None:
-    older = client.post("/api/conversations").json()
-    newer = client.post("/api/conversations").json()
+    older = fake_conversations.add(user.id, "vanilla for winter")
+    newer = fake_conversations.add(user.id, "delivery to Lviv")
     fake_conversations.add(fake_users.add("+48512345678", "Ann").id)
 
     listed = client.get("/api/conversations").json()
 
-    assert older == {"id": older["id"], "title": None}
-    assert [c["id"] for c in listed] == [newer["id"], older["id"]]
+    assert listed == [
+        {"id": str(newer.id), "title": "delivery to Lviv"},
+        {"id": str(older.id), "title": "vanilla for winter"},
+    ]
 
 
 def test_returns_the_transcript_of_own_conversations_only(

@@ -19,12 +19,12 @@ router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
 
 class ConversationOut(BaseModel):
-    """A conversation in the list. ``title`` is empty until the first message."""
+    """A conversation in the list, titled after its first message."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    title: str | None
+    title: str
 
 
 class MessageOut(BaseModel):
@@ -73,12 +73,6 @@ async def list_conversations(
         ConversationOut.model_validate(conversation)
         for conversation in await conversations.list_for_user(user.id)
     ]
-
-
-@router.post("", status_code=status.HTTP_201_CREATED)
-async def create_conversation(user: CurrentUser, conversations: Conversations) -> ConversationOut:
-    """Start an empty conversation."""
-    return ConversationOut.model_validate(await conversations.create(user.id))
 
 
 def _message_out(message: Message, turn: Turn | None) -> MessageOut:

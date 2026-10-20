@@ -7,7 +7,6 @@ import {
 } from '../api/chat.ts'
 import { ApiError } from '../api/client.ts'
 import {
-  createConversation,
   fetchMessages,
   listConversations,
   type Conversation,
@@ -51,7 +50,7 @@ function toChatMessage(message: StoredMessage): ChatMessage {
  * The signed-in user's conversations and the open one.
  *
  * The most recent conversation opens on load. "New chat" only clears the view;
- * the conversation is created when its first message is sent. Replies stream in
+ * the server creates the conversation when its first turn starts. Replies stream in
  * token by token. `stop()` cancels the one in progress, and so does unmounting,
  * for example on log out.
  */
@@ -131,11 +130,16 @@ export function useChat() {
     setError(null)
     setStreaming(true)
     try {
-      const id = activeId ?? (await createConversation()).id
-      setActiveId(id)
       let done = false
-      for await (const chatEvent of streamMessage(id, text, request.signal)) {
+      for await (const chatEvent of streamMessage(
+        activeId,
+        text,
+        request.signal,
+      )) {
         switch (chatEvent.event) {
+          case 'start':
+            setActiveId(chatEvent.data.conversation_id)
+            break
           case 'token':
             updateReply((reply) => ({
               content: reply.content + chatEvent.data.text,
