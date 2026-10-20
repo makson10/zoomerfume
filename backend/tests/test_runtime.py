@@ -5,8 +5,9 @@ import uuid
 from typing import Any
 
 import pytest
-from agents import SQLiteSession, set_tracing_disabled
+from agents import SQLiteSession, Usage, set_tracing_disabled
 from agents.testing import ScriptedModel, assistant_message, function_call
+from openai.types.responses.response_usage import InputTokensDetails
 
 from app.agent import runtime
 from app.agent.citations import Citations
@@ -22,6 +23,7 @@ from app.agent.runtime import (
 from app.agent.streaming import Token, ToolCall
 from app.core.config import Settings
 from app.db.engine import create_db_engine
+from app.services.usage import TurnUsage
 from tests.fakes import FakeKnowledgeBase, FakeNoteStore, FakeTurnStore, make_hit
 
 
@@ -130,7 +132,13 @@ async def test_turn_runner_streams_a_tool_call_and_checks_citations(
 ) -> None:
     fake_kb.hits = [make_hit("KB-031")]
     reply = "Try KB-031 [KB-031], or KB-012 from before [KB-012], not [KB-099]."
-    model = ScriptedModel([[_search_call("c1")], [assistant_message(reply)]])
+    usage = Usage(
+        requests=1,
+        input_tokens=2000,
+        input_tokens_details=InputTokensDetails(cached_tokens=1800, cache_write_tokens=100),
+        output_tokens=50,
+    )
+    model = ScriptedModel([[_search_call("c1")], [assistant_message(reply)]], default_usage=usage)
     runner.agent.model = model
     turn = await _start(fake_turns, "something vanilla?", retrieved_before={"KB-012"})
 
@@ -144,6 +152,9 @@ async def test_turn_runner_streams_a_tool_call_and_checks_citations(
     assert result.citations == Citations(valid=["KB-031", "KB-012"], invalid=["KB-099"])
     stored = fake_turns.turns[turn.id]
     assert (stored.status, stored.citations) == ("ok", result.citations.model_dump())
+    assert sorted(call.kind for call in stored.calls) == ["chat", "chat", "embedding"]
+    assert result.usage == TurnUsage.of(stored.calls)
+    assert (result.usage.calls, result.usage.cached_tokens) == (2, 3600)
     model.assert_complete()
 
 

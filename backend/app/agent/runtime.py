@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.agent.citations import Citations, check_citations
 from app.agent.context import Step, TurnContext, TurnStatus
+from app.agent.hooks import UsageHooks
 from app.agent.input_filter import cacheable_input
 from app.agent.prompts import AGENT_INSTRUCTIONS
 from app.agent.streaming import Token, TurnEvent, agent_events
@@ -41,6 +42,7 @@ from app.db.guard import WRITE_TIMEOUT_S
 from app.db.message_log import record_turn_messages
 from app.kb.knowledge_base import KnowledgeBase
 from app.services.notes import NoteStore
+from app.services.usage import TurnUsage
 
 if TYPE_CHECKING:
     from app.services.turns import TurnStore
@@ -136,8 +138,8 @@ class TurnStart(BaseModel):
 
 
 class TurnResult(BaseModel):
-    """Zoomer's reply to one message, with how the turn ended, its checked citations and
-    the tool calls behind it."""
+    """Zoomer's reply to one message, with how the turn ended, its checked citations, the
+    tool calls behind it and what its model calls cost."""
 
     conversation_id: uuid.UUID
     turn_id: uuid.UUID
@@ -145,6 +147,7 @@ class TurnResult(BaseModel):
     status: TurnStatus
     citations: Citations
     steps: list[Step]
+    usage: TurnUsage
 
 
 class TurnRunner:
@@ -171,6 +174,7 @@ class TurnRunner:
             # keeps replies quick and consistent.
             model_settings=ModelSettings(reasoning=Reasoning(effort="low")),
         )
+        self._hooks = UsageHooks(settings.chat_model)
         logger.info("Agent created | model=%s", settings.chat_model)
 
     async def stream(
@@ -183,7 +187,7 @@ class TurnRunner:
         ``AGENT_MAX_TURNS`` ends with :data:`MAX_STEPS_TEXT`, so the chat never goes
         silent. Only an answer that finished normally gets its citations checked,
         because those fixed texts cite nothing. The exchange goes to the message log,
-        and the turn is stored with its status, citations and tool steps.
+        and the turn is stored with its status, citations, tool steps and model calls.
 
         Closing the stream early (the customer pressed Stop or left) cancels the run.
         The turn is stored as ``cancelled``, and the reply so far is kept in the
@@ -213,6 +217,7 @@ class TurnRunner:
             max_turns=self._settings.agent_max_turns,
             run_config=self._run_config(turn.conversation_id),
             error_handlers={"max_turns": self._out_of_steps},
+            hooks=self._hooks,
         )
         streamed = ""
         try:
@@ -240,7 +245,7 @@ class TurnRunner:
             citations = check_citations(reply, ctx.retrieved_ids, turn.retrieved_before)
         if self._settings.message_log_enabled:
             await record_turn_messages(self._sessionmaker, ctx, reply)
-        await turns.finish(turn.id, ctx.status, citations, ctx.steps)
+        await turns.finish(turn.id, ctx.status, citations, ctx.steps, ctx.calls)
         yield TurnResult(
             conversation_id=turn.conversation_id,
             turn_id=turn.id,
@@ -248,12 +253,14 @@ class TurnRunner:
             status=ctx.status,
             citations=citations,
             steps=ctx.steps,
+            usage=TurnUsage.of(ctx.calls),
         )
 
     async def _store_stopped_turn(
         self, ctx: TurnContext, session: SQLAlchemySession, turns: TurnStore, reply: str
     ) -> None:
-        """Store a stopped turn with its tool steps, and keep the reply it wrote so far."""
+        """Store a stopped turn with its tool steps and finished model calls, and keep the
+        reply it wrote so far."""
         logger.info(
             "turn stopped | conversation=%s steps=%d chars=%d",
             ctx.conversation_id,
@@ -261,7 +268,7 @@ class TurnRunner:
             len(reply),
         )
         try:
-            await turns.finish(ctx.turn_id, "cancelled", Citations(), ctx.steps)
+            await turns.finish(ctx.turn_id, "cancelled", Citations(), ctx.steps, ctx.calls)
             if reply:
                 await session.add_items([{"role": "assistant", "content": reply}])
         except Exception:

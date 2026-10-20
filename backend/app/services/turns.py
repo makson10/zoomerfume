@@ -1,4 +1,4 @@
-"""Turns and the tool steps the agent took in them."""
+"""Turns, the tool steps the agent took in them and their model calls."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.agent.citations import Citations
 from app.agent.context import Step, TurnStatus
 from app.db.models import ToolStep, Turn
+from app.services.usage import CallUsage
 
 # A turn still running after this long was left behind by a server that stopped mid-turn.
 STALE_TURN_AFTER = timedelta(minutes=2)
@@ -22,7 +23,7 @@ RUNNING_TURN_INDEX_WHERE = text("status = 'running'")
 
 
 class TurnStore:
-    """Reads and writes turns and their tool steps in Postgres."""
+    """Reads and writes turns, their tool steps and their model calls in Postgres."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -55,15 +56,21 @@ class TurnStore:
         return turn_id
 
     async def finish(
-        self, turn_id: uuid.UUID, status: TurnStatus, citations: Citations, steps: list[Step]
+        self,
+        turn_id: uuid.UUID,
+        status: TurnStatus,
+        citations: Citations,
+        steps: list[Step],
+        calls: list[CallUsage],
     ) -> None:
-        """Store how the turn ended, its citations and its tool steps."""
+        """Store how the turn ended, its citations, its tool steps and its model calls."""
         await self._session.execute(
             update(Turn)
             .where(Turn.id == turn_id)
             .values(status=status, citations=citations.model_dump(), finished_at=func.now())
         )
         self._session.add_all(ToolStep(turn_id=turn_id, **step.model_dump()) for step in steps)
+        self._session.add_all(call.as_row(turn_id) for call in calls)
         await self._session.commit()
 
     async def retrieved_ids(self, conversation_id: uuid.UUID) -> set[str]:
@@ -77,10 +84,11 @@ class TurnStore:
         return set(result)
 
     async def for_conversation(self, conversation_id: uuid.UUID) -> list[Turn]:
-        """Return the conversation's turns with their tool steps, in two queries."""
+        """Return the conversation's turns with their tool steps and model calls, in three
+        queries."""
         result = await self._session.scalars(
             select(Turn)
             .where(Turn.conversation_id == conversation_id)
-            .options(selectinload(Turn.steps))
+            .options(selectinload(Turn.steps), selectinload(Turn.calls))
         )
         return list(result)

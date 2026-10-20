@@ -14,6 +14,7 @@ from app.api.deps import Conversations, CurrentUser, Turns
 from app.api.errors import ApiError
 from app.db.models import Conversation, Message, Turn, User
 from app.services.conversations import ConversationStore
+from app.services.usage import TurnUsage
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -30,8 +31,8 @@ class ConversationOut(BaseModel):
 class MessageOut(BaseModel):
     """One logged message of a conversation's transcript.
 
-    Zoomer's replies also carry how their turn ended, their checked citations and the tool
-    calls behind them.
+    Zoomer's replies also carry how their turn ended, their checked citations, the tool
+    calls behind them and what the turn's model calls cost.
     """
 
     # Every field is in the response, so the schema marks the defaulted ones required too.
@@ -47,6 +48,7 @@ class MessageOut(BaseModel):
     status: TurnStatus | None = None
     citations: Citations | None = None
     steps: list[Step] = []
+    usage: TurnUsage | None = None
 
 
 async def require_conversation(
@@ -82,6 +84,7 @@ def _message_out(message: Message, turn: Turn | None) -> MessageOut:
         if turn.citations is not None:
             out.citations = Citations.model_validate(turn.citations)
         out.steps = [Step.model_validate(step) for step in turn.steps]
+        out.usage = TurnUsage.of(turn.calls)
     return out
 
 

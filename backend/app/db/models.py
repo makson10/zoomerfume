@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     Uuid,
@@ -105,6 +107,7 @@ class Turn(Base):
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     steps: Mapped[list[ToolStep]] = relationship(order_by="ToolStep.step", lazy="raise")
+    calls: Mapped[list[LlmCall]] = relationship(lazy="raise")
 
     __table_args__ = (
         Index("ix_turns_conversation_id", "conversation_id"),
@@ -142,6 +145,32 @@ class ToolStep(Base):
     )
 
     __table_args__ = (Index("ix_tool_steps_turn_id", "turn_id"),)
+
+
+class LlmCall(Base):
+    """One model call and what it cost: a chat call of a turn, or an embeddings call."""
+
+    __tablename__ = "llm_calls"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Empty for ingest, which runs outside any turn.
+    turn_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("turns.id", ondelete="SET NULL"), nullable=True
+    )
+    # "chat" | "embedding"
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    # All input tokens, the cached and cache-write ones included.
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    cached_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    cache_write_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(12, 9), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("ix_llm_calls_turn_id", "turn_id"),)
 
 
 class Note(Base):

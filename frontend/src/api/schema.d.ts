@@ -192,10 +192,10 @@ export interface paths {
      *
      *     ``start`` names the conversation and the turn, which is how the web chat learns the id
      *     of a new conversation. ``token`` events carry the reply as the model writes it, and each
-     *     tool call sends
-     *     ``tool_call`` and then ``tool_result`` with its step. The stream ends with
-     *     ``citation`` and ``done``. ``done`` carries the stored reply, which replaces the
-     *     streamed text, because the fallback and step-limit texts are never streamed.
+     *     tool call sends ``tool_call`` and then ``tool_result`` with its step. The stream ends
+     *     with ``citation``, ``usage`` (the turn's tokens and cost) and ``done``. ``done`` carries
+     *     the stored reply, which replaces the streamed text, because the fallback and step-limit
+     *     texts are never streamed.
      *     ``error`` ends a stream that broke. Closing the connection stops the turn.
      *
      *     The return type lists the events' data models for the OpenAPI schema. Each one is
@@ -363,8 +363,8 @@ export interface components {
      * MessageOut
      * @description One logged message of a conversation's transcript.
      *
-     *     Zoomer's replies also carry how their turn ended, their checked citations and the tool
-     *     calls behind them.
+     *     Zoomer's replies also carry how their turn ended, their checked citations, the tool
+     *     calls behind them and what the turn's model calls cost.
      */
     MessageOut: {
       /** Id */
@@ -386,6 +386,7 @@ export interface components {
        * @default []
        */
       steps: components['schemas']['Step'][]
+      usage: components['schemas']['TurnUsage'] | null
     }
     /**
      * NewPhone
@@ -535,8 +536,8 @@ export interface components {
     }
     /**
      * TurnResult
-     * @description Zoomer's reply to one message, with how the turn ended, its checked citations and
-     *     the tool calls behind it.
+     * @description Zoomer's reply to one message, with how the turn ended, its checked citations, the
+     *     tool calls behind it and what its model calls cost.
      */
     TurnResult: {
       /**
@@ -559,6 +560,7 @@ export interface components {
       citations: components['schemas']['Citations']
       /** Steps */
       steps: components['schemas']['Step'][]
+      usage: components['schemas']['TurnUsage']
     }
     /**
      * TurnStart
@@ -575,6 +577,27 @@ export interface components {
        * Format: uuid
        */
       turn_id: string
+    }
+    /**
+     * TurnUsage
+     * @description What one turn's model calls used and cost.
+     *
+     *     The calls and tokens are the chat model's. The cost also covers the embeddings of the
+     *     turn's searches.
+     */
+    TurnUsage: {
+      /** Calls */
+      calls: number
+      /** Input Tokens */
+      input_tokens: number
+      /** Cached Tokens */
+      cached_tokens: number
+      /** Cache Write Tokens */
+      cache_write_tokens: number
+      /** Output Tokens */
+      output_tokens: number
+      /** Cost Usd */
+      cost_usd: string
     }
     /**
      * UserOut
@@ -618,6 +641,7 @@ export type ToolSchema = components['schemas']['ToolSchema']
 export type TurnDone = components['schemas']['TurnDone']
 export type TurnResult = components['schemas']['TurnResult']
 export type TurnStart = components['schemas']['TurnStart']
+export type TurnUsage = components['schemas']['TurnUsage']
 export type UserOut = components['schemas']['UserOut']
 export type $defs = Record<string, never>
 export interface operations {

@@ -27,6 +27,17 @@ def test_health_returns_ok(client: TestClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
+# The usage of the fake runner's one model call.
+USAGE = {
+    "calls": 1,
+    "input_tokens": 2000,
+    "cached_tokens": 1800,
+    "cache_write_tokens": 100,
+    "output_tokens": 50,
+    "cost_usd": "0.000065500",
+}
+
+
 def test_chat_runs_a_turn_and_returns_its_result(
     client: TestClient,
     user: User,
@@ -57,6 +68,7 @@ def test_chat_runs_a_turn_and_returns_its_result(
         "status": "ok",
         "citations": {"valid": [], "invalid": [], "missing": False},
         "steps": [make_step(["KB-031"]).model_dump()],
+        "usage": USAGE,
     }
     assert fake_turns.turns[turn.id].status == "ok"
 
@@ -95,6 +107,7 @@ def test_chat_stream_sends_the_turn_as_events(
         ("tool_result", step.model_dump()),
         ("token", {"text": "fake reply"}),
         ("citation", {"valid": ["KB-031"], "invalid": [], "missing": False}),
+        ("usage", USAGE),
         ("done", {"turn_id": turn_id, "status": "ok", "reply": "fake reply"}),
     ]
 

@@ -19,6 +19,7 @@ from app.agent.streaming import Token, ToolCall
 from app.api.conversations import require_conversation
 from app.api.deps import Conversations, CurrentUser, Runtime, Turns, limit_chat
 from app.api.errors import ApiError, ErrorDetail
+from app.services.usage import TurnUsage
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,8 @@ class TurnDone(BaseModel):
 
 
 # The ``data`` of each stream event, in event order: start, token, tool_call, tool_result,
-# citation, done, or error.
-ChatEventData = TurnStart | Token | ToolCall | Step | Citations | TurnDone | ErrorDetail
+# citation, usage, done, or error.
+ChatEventData = TurnStart | Token | ToolCall | Step | Citations | TurnUsage | TurnDone | ErrorDetail
 
 
 async def start_turn(
@@ -116,10 +117,10 @@ async def chat_stream(
 
     ``start`` names the conversation and the turn, which is how the web chat learns the id
     of a new conversation. ``token`` events carry the reply as the model writes it, and each
-    tool call sends
-    ``tool_call`` and then ``tool_result`` with its step. The stream ends with
-    ``citation`` and ``done``. ``done`` carries the stored reply, which replaces the
-    streamed text, because the fallback and step-limit texts are never streamed.
+    tool call sends ``tool_call`` and then ``tool_result`` with its step. The stream ends
+    with ``citation``, ``usage`` (the turn's tokens and cost) and ``done``. ``done`` carries
+    the stored reply, which replaces the streamed text, because the fallback and step-limit
+    texts are never streamed.
     ``error`` ends a stream that broke. Closing the connection stops the turn.
 
     The return type lists the events' data models for the OpenAPI schema. Each one is
@@ -142,6 +143,7 @@ async def chat_stream(
                         yield ServerSentEvent(event="tool_result", data=event)
                     case TurnResult():
                         yield ServerSentEvent(event="citation", data=event.citations)
+                        yield ServerSentEvent(event="usage", data=event.usage)
                         done = TurnDone(
                             turn_id=event.turn_id, reply=event.reply, status=event.status
                         )
