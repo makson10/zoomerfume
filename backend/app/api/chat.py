@@ -37,13 +37,15 @@ async def start_turn(
     """Start a turn for the message in one of the user's conversations.
 
     It runs as a dependency, before a streamed reply sends anything, so its errors are
-    plain HTTP errors.
+    plain HTTP errors. The reads come first and both writes commit, so no transaction
+    stays open on the request's session while the turn runs.
 
     Raises:
         ApiError: 404 when the conversation isn't the user's, 409 while Zoomer is still
             answering another message in it.
     """
     conversation = await require_conversation(conversations, body.conversation_id, user)
+    retrieved_before = await turns.retrieved_ids(conversation.id)
     turn_id = await turns.start(conversation.id)
     if turn_id is None:
         raise ApiError(
@@ -53,7 +55,6 @@ async def start_turn(
             "Wait for my reply or stop it, then send this one again.",
         )
     await conversations.mark_active(conversation, body.message)
-    retrieved_before = await turns.retrieved_ids(conversation.id)
     return NewTurn(turn_id, conversation.id, user.name, body.message, retrieved_before)
 
 
