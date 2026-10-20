@@ -4,6 +4,7 @@ import {
   type Citations,
   type Step,
   type TurnStatus,
+  type TurnUsage,
 } from '../api/chat.ts'
 import { ApiError } from '../api/client.ts'
 import {
@@ -24,6 +25,8 @@ export interface ChatMessage {
   /** Set on Zoomer's replies that have a recorded turn. */
   citations?: Citations | null
   steps?: Step[]
+  /** What the reply's model calls cost. */
+  usage?: TurnUsage | null
 }
 
 const FALLBACK_ERROR = "Zoomer couldn't answer right now. Please try again."
@@ -43,6 +46,7 @@ function toChatMessage(message: StoredMessage): ChatMessage {
     status: message.status,
     citations: message.citations,
     steps: message.steps,
+    usage: message.usage,
   }
 }
 
@@ -167,6 +171,9 @@ export function useChat() {
             break
           case 'citation':
             updateReply(() => ({ citations: chatEvent.data }))
+            break
+          case 'usage':
+            updateReply(() => ({ usage: chatEvent.data }))
             break
           case 'done':
             done = true

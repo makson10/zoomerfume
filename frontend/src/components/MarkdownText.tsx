@@ -12,9 +12,17 @@ interface MarkdownTextProps {
   renderCitation?: (recordId: string) => ReactNode
 }
 
-/** Markdown with GFM tables. Links open in a new tab, and raw HTML is not rendered. */
+/**
+ * Markdown with GFM tables, which scroll sideways when they don't fit. Links open in
+ * a new tab, and raw HTML is not rendered.
+ */
 export function MarkdownText({ children, renderCitation }: MarkdownTextProps) {
   const components: Components = {
+    table: ({ node: _node, ...props }) => (
+      <div style={{ overflowX: 'auto' }}>
+        <table {...props} />
+      </div>
+    ),
     a: ({ node: _node, href, children: label, ...props }) => {
       if (renderCitation && href?.startsWith(CITATION_HREF)) {
         return renderCitation(href.slice(1))
