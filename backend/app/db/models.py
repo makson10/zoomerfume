@@ -144,6 +144,32 @@ class ToolStep(Base):
     __table_args__ = (Index("ix_tool_steps_turn_id", "turn_id"),)
 
 
+class Note(Base):
+    """A note Zoomer saved for a customer, e.g. a wishlist item."""
+
+    __tablename__ = "notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # Where the note was saved.
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    turn_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("turns.id", ondelete="SET NULL"), nullable=True
+    )
+    text: Mapped[str] = mapped_column(String(500), nullable=False)
+    # "confirmed"
+    status: Mapped[str] = mapped_column(String(16), server_default="confirmed", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("ix_notes_user_created", "user_id", "created_at"),)
+
+
 class RateLimit(Base):
     """How many requests one key made in one fixed one-minute window."""
 

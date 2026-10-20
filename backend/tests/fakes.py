@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 from app.agent.citations import Citations
 from app.agent.context import Step, TurnStatus
 from app.agent.runtime import NewTurn, TurnResult, TurnStart
 from app.agent.streaming import Token, ToolCall, TurnEvent
-from app.db.models import Conversation, KbRecord, Message, ToolStep, Turn, User
+from app.db.models import Conversation, KbRecord, Message, Note, ToolStep, Turn, User
 from app.kb.search import Hit
 from app.services.conversations import conversation_title
 
@@ -148,6 +149,31 @@ class FakeKnowledgeBase:
 
     async def get_record(self, record_id: str) -> KbRecord | None:
         return self.records.get(record_id)
+
+
+class FakeNoteStore:
+    """Stands in for ``NoteStore`` with notes kept in memory, the newest last."""
+
+    def __init__(self) -> None:
+        self.notes: list[Note] = []
+
+    async def add(
+        self, user_id: uuid.UUID, conversation_id: uuid.UUID, turn_id: uuid.UUID, text: str
+    ) -> Note:
+        note = Note(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            text=text,
+            status="confirmed",
+            created_at=datetime.now(UTC),
+        )
+        self.notes.append(note)
+        return note
+
+    async def list_for_user(self, user_id: uuid.UUID, limit: int) -> list[Note]:
+        return [note for note in reversed(self.notes) if note.user_id == user_id][:limit]
 
 
 def make_step(record_ids: list[str]) -> Step:

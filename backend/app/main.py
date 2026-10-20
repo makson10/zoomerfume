@@ -3,7 +3,8 @@ Application entry point: :func:`create_app` builds the FastAPI app.
 
 Lifespan events:
   startup  → create the clients, the database engine, the session factory, the
-             knowledge base and the turn runner; verify Postgres / Qdrant connectivity
+             knowledge base, the note store and the turn runner; verify Postgres /
+             Qdrant connectivity
   shutdown → close the clients and dispose the database engine
 """
 
@@ -24,6 +25,7 @@ from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
 from app.api.errors import ERROR_RESPONSES, ApiError, api_error_handler
 from app.api.health import router as health_router
+from app.api.notes import router as notes_router
 from app.api.records import router as records_router
 from app.api.spa import mount_web_chat
 from app.api.tools import router as tools_router
@@ -33,6 +35,7 @@ from app.db.engine import create_db_engine, ping_db
 from app.kb.knowledge_base import KnowledgeBase
 from app.middleware.request_context import FastAPILoggingMiddleware
 from app.services.clients import create_openai_client, create_qdrant_client
+from app.services.notes import NoteStore
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +68,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     set_default_openai_client(openai_client)
     kb = KnowledgeBase(settings, qdrant_client, openai_client, sessionmaker)
+    notes = NoteStore(sessionmaker)
     app.state.sessionmaker = sessionmaker
     app.state.kb = kb
+    app.state.notes = notes
     app.state.turn_runner = TurnRunner(settings, engine, kb)
 
     # 1. Verify Postgres connectivity. Users and conversations live there, so
@@ -165,5 +170,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(chat_router)
     app.include_router(records_router)
     app.include_router(tools_router)
+    app.include_router(notes_router)
     mount_web_chat(app)
     return app

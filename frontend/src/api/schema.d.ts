@@ -254,6 +254,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/notes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * List Notes
+     * @description Return the user's notes, the newest first, at most :data:`NOTES_LIMIT` of them.
+     */
+    get: operations['list_notes_api_notes_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -381,6 +401,24 @@ export interface components {
       phone: string
       /** Message */
       message: string
+    }
+    /**
+     * NoteOut
+     * @description One of the customer's notes.
+     */
+    NoteOut: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Text */
+      text: string
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
     }
     /** PhoneRequest */
     PhoneRequest: {
@@ -569,6 +607,7 @@ export type ErrorDetail = components['schemas']['ErrorDetail']
 export type KnownPhone = components['schemas']['KnownPhone']
 export type MessageOut = components['schemas']['MessageOut']
 export type NewPhone = components['schemas']['NewPhone']
+export type NoteOut = components['schemas']['NoteOut']
 export type PhoneRequest = components['schemas']['PhoneRequest']
 export type RecordOut = components['schemas']['RecordOut']
 export type SignInResponse = components['schemas']['SignInResponse']
@@ -910,6 +949,35 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ToolSchema'][]
+        }
+      }
+      /** @description Client Error */
+      '4XX': {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorBody']
+        }
+      }
+    }
+  }
+  list_notes_api_notes_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NoteOut'][]
         }
       }
       /** @description Client Error */
