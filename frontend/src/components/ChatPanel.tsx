@@ -1,5 +1,4 @@
 import { Container, ScrollArea } from '@mantine/core'
-import { useState } from 'react'
 import type { ChatMessage } from '../hooks/useChat.ts'
 import { Composer } from './Composer.tsx'
 import { MessageList } from './MessageList.tsx'
@@ -25,15 +24,6 @@ export function ChatPanel({
   onSend,
   onOpenRecord,
 }: ChatPanelProps) {
-  const [draft, setDraft] = useState('')
-
-  function handleSend() {
-    const text = draft.trim()
-    if (!text) return
-    setDraft('')
-    onSend(text)
-  }
-
   return (
     <Container
       size="sm"
@@ -49,13 +39,7 @@ export function ChatPanel({
           onOpenRecord={onOpenRecord}
         />
       </ScrollArea>
-      <Composer
-        value={draft}
-        onChange={setDraft}
-        onSend={handleSend}
-        disabled={loading}
-        placeholder={placeholder}
-      />
+      <Composer onSend={onSend} disabled={loading} placeholder={placeholder} />
     </Container>
   )
 }

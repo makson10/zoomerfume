@@ -1,4 +1,5 @@
 import { Group, Paper, Stack, Text } from '@mantine/core'
+import { memo } from 'react'
 import type { ChatMessage } from '../hooks/useChat.ts'
 import { CitationChip } from './CitationChip.tsx'
 import { MarkdownText } from './MarkdownText.tsx'
@@ -10,7 +11,14 @@ interface MessageBubbleProps {
   onOpenRecord?: (recordId: string) => void
 }
 
-export function MessageBubble({ message, onOpenRecord }: MessageBubbleProps) {
+/**
+ * One chat message. It is memoized: while a reply streams, only the bubble whose
+ * message changed re-renders and re-parses its Markdown.
+ */
+export const MessageBubble = memo(function MessageBubble({
+  message,
+  onOpenRecord,
+}: MessageBubbleProps) {
   if (message.role === 'user') {
     return (
       <Paper
@@ -62,4 +70,4 @@ export function MessageBubble({ message, onOpenRecord }: MessageBubbleProps) {
       )}
     </Stack>
   )
-}
+})
