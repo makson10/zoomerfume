@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     Uuid,
@@ -48,8 +50,8 @@ class Conversation(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    # The first user message, shortened. Empty until the first message.
-    title: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # The first user message, shortened.
+    title: Mapped[str] = mapped_column(String(80), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -73,6 +75,8 @@ class Message(Base):
     # "user" | "assistant"
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # "chat" | "command": a chat command such as /cost and its reply, which run no turn.
+    kind: Mapped[str] = mapped_column(String(16), server_default="chat", nullable=False)
     # Shared by the user message and the reply it produced.
     turn_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("turns.id", ondelete="SET NULL"), nullable=True
@@ -142,6 +146,58 @@ class ToolStep(Base):
     )
 
     __table_args__ = (Index("ix_tool_steps_turn_id", "turn_id"),)
+
+
+class LlmCall(Base):
+    """One model call and what it cost: a chat call of a turn, or an embeddings call."""
+
+    __tablename__ = "llm_calls"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Empty for ingest, which runs outside any turn.
+    turn_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("turns.id", ondelete="SET NULL"), nullable=True
+    )
+    # "chat" | "embedding"
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    # All input tokens, the cached and cache-write ones included.
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    cached_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    cache_write_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(12, 9), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("ix_llm_calls_turn_id", "turn_id"),)
+
+
+class Note(Base):
+    """A note Zoomer saved for a customer, e.g. a wishlist item."""
+
+    __tablename__ = "notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # Where the note was saved.
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    turn_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("turns.id", ondelete="SET NULL"), nullable=True
+    )
+    text: Mapped[str] = mapped_column(String(500), nullable=False)
+    # "confirmed"
+    status: Mapped[str] = mapped_column(String(16), server_default="confirmed", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("ix_notes_user_created", "user_id", "created_at"),)
 
 
 class RateLimit(Base):

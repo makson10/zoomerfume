@@ -10,19 +10,21 @@ from agents.tool_context import ToolContext
 from fastapi.testclient import TestClient
 
 from app.agent.context import TurnContext
-from app.agent.tools import open_record, search_kb
+from app.agent.tools import build_tools, open_record, search_kb
+from app.agent.tools.save_note import make_save_note
 from app.db.models import KbRecord, User
-from tests.fakes import FakeKnowledgeBase, make_hit
+from tests.fakes import FakeKnowledgeBase, FakeNoteStore, make_hit
 
 
 @pytest.fixture
-def ctx(fake_kb: FakeKnowledgeBase) -> TurnContext:
+def ctx(fake_kb: FakeKnowledgeBase, fake_notes: FakeNoteStore) -> TurnContext:
     return TurnContext(
         conversation_id=uuid.uuid4(),
         user_name="Mary",
-        turn_id="turn-1",
+        turn_id=uuid.uuid4(),
         user_message="hi",
         kb=fake_kb,
+        notes=fake_notes,
     )
 
 
@@ -101,15 +103,56 @@ async def test_tool_exceptions_become_an_upstream_error(
     assert (ctx.steps[0].success, ctx.steps[0].record_ids) == (False, [])
 
 
-def test_schema_endpoint_lists_both_tools_with_strict_schemas(
+async def test_save_note_writes_for_the_user_it_was_built_for(
+    ctx: TurnContext, fake_notes: FakeNoteStore
+) -> None:
+    owner, intruder = uuid.uuid4(), uuid.uuid4()
+    save_note = make_save_note(owner)
+
+    result = await call_tool(
+        save_note, ctx, text="  Wishlist: Jazz Club, 100 ml ", user_id=str(intruder)
+    )
+
+    [note] = fake_notes.notes
+    assert result == {"success": True, "data": {"note_id": str(note.id), "status": "confirmed"}}
+    assert (note.user_id, note.conversation_id, note.turn_id) == (
+        owner,
+        ctx.conversation_id,
+        ctx.turn_id,
+    )
+    assert note.text == "Wishlist: Jazz Club, 100 ml"
+    assert ctx.steps[0].args == {"text": "  Wishlist: Jazz Club, 100 ml "}
+
+
+@pytest.mark.parametrize("text", ["   ", "x" * 501], ids=["blank", "too-long"])
+async def test_save_note_refuses_an_empty_or_long_note(
+    ctx: TurnContext, fake_notes: FakeNoteStore, text: str
+) -> None:
+    result = await call_tool(make_save_note(uuid.uuid4()), ctx, text=text)
+
+    assert (result["success"], result["code"]) == (False, "INVALID_ARGUMENT")
+    assert fake_notes.notes == []
+
+
+def test_schema_endpoint_lists_the_tools_with_strict_schemas(
     client: TestClient, user: User
 ) -> None:
     schemas = client.get("/api/tools/schema").json()
 
-    assert [schema["name"] for schema in schemas] == ["search_kb", "open_record"]
+    assert [schema["name"] for schema in schemas] == ["search_kb", "open_record", "save_note"]
     for schema in schemas:
         assert schema["strict"] is True
         assert schema["parameters"]["additionalProperties"] is False
     k = schemas[0]["parameters"]["properties"]["k"]
     assert (k["minimum"], k["maximum"]) == (1, 8)
     assert list(schemas[1]["parameters"]["properties"]) == ["record_id"]
+    assert list(schemas[2]["parameters"]["properties"]) == ["text"]
+    assert schemas[2]["parameters"]["required"] == ["text"]
+
+
+def test_tool_schemas_are_the_same_for_every_user() -> None:
+    mine, theirs = build_tools(uuid.uuid4()), build_tools(uuid.uuid4())
+
+    assert [(t.name, t.description, t.params_json_schema) for t in mine] == [
+        (t.name, t.description, t.params_json_schema) for t in theirs
+    ]

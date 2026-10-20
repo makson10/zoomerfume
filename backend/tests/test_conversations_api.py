@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.agent.citations import Citations
 from app.db.models import Message, User
+from app.services.usage import CallUsage
 from tests.fakes import FakeConversationStore, FakeTurnStore, FakeUserStore, make_step
 
 
@@ -13,14 +14,16 @@ def test_lists_own_conversations_most_recent_first(
     fake_users: FakeUserStore,
     fake_conversations: FakeConversationStore,
 ) -> None:
-    older = client.post("/api/conversations").json()
-    newer = client.post("/api/conversations").json()
+    older = fake_conversations.add(user.id, "vanilla for winter")
+    newer = fake_conversations.add(user.id, "delivery to Lviv")
     fake_conversations.add(fake_users.add("+48512345678", "Ann").id)
 
     listed = client.get("/api/conversations").json()
 
-    assert older == {"id": older["id"], "title": None}
-    assert [c["id"] for c in listed] == [newer["id"], older["id"]]
+    assert listed == [
+        {"id": str(newer.id), "title": "delivery to Lviv"},
+        {"id": str(older.id), "title": "vanilla for winter"},
+    ]
 
 
 def test_returns_the_transcript_of_own_conversations_only(
@@ -32,7 +35,12 @@ def test_returns_the_transcript_of_own_conversations_only(
 ) -> None:
     own = fake_conversations.add(user.id)
     citations = Citations(valid=["KB-012"], invalid=[], missing=False)
-    turn = fake_turns.add(own.id, citations=citations, steps=[make_step(["KB-012"])])
+    calls = [
+        CallUsage("chat", "gpt-6-luna", 2000, 0, 1800, 40),
+        CallUsage("embedding", "text-embedding-3-small", 10),
+        CallUsage("chat", "gpt-6-luna", 2600, 1800, 600, 60),
+    ]
+    turn = fake_turns.add(own.id, citations=citations, steps=[make_step(["KB-012"])], calls=calls)
     fake_conversations.transcripts[own.id] = [
         Message(id=1, role="user", content="hi", turn_id=turn.id),
         Message(id=2, role="assistant", content="hey [KB-012]!", turn_id=turn.id),
@@ -52,6 +60,7 @@ def test_returns_the_transcript_of_own_conversations_only(
             "status": None,
             "citations": None,
             "steps": [],
+            "usage": None,
         },
         {
             "id": 2,
@@ -61,6 +70,14 @@ def test_returns_the_transcript_of_own_conversations_only(
             "status": "ok",
             "citations": citations.model_dump(),
             "steps": [make_step(["KB-012"]).model_dump()],
+            "usage": {
+                "calls": 2,
+                "input_tokens": 4600,
+                "cached_tokens": 1800,
+                "cache_write_tokens": 2400,
+                "output_tokens": 100,
+                "cost_usd": "0.000408200",
+            },
         },
     ]
     assert hidden.status_code == 404

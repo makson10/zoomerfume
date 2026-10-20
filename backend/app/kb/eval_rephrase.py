@@ -38,7 +38,7 @@ async def _run(settings: Settings, cases: list[Case], k: int) -> list[list[Hit]]
     qdrant = create_qdrant_client(settings)
     openai = create_openai_client(settings)
     try:
-        return [await search(qdrant, openai, settings, case.question, k) for case in cases]
+        return [(await search(qdrant, openai, settings, case.question, k))[0] for case in cases]
     finally:
         await openai.close()
         await qdrant.close()

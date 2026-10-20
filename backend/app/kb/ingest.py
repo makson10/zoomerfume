@@ -3,7 +3,8 @@
     python -m app.kb.ingest [--force] [--dry-run]
 
 A record whose file hasn't changed since the last run is skipped, so a re-run embeds
-nothing. Records removed from the corpus are deleted from both stores.
+nothing. Records removed from the corpus are deleted from both stores. A run that embeds
+something records its usage and cost in ``llm_calls``.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from app.kb.store import (
     wait_until_indexed,
 )
 from app.services.clients import create_openai_client, create_qdrant_client
+from app.services.usage import CallUsage
 
 
 @dataclass
@@ -88,6 +90,9 @@ async def ingest(
                 model=settings.embedding_model,
                 dimensions=settings.embedding_dimensions,
             )
+            if summary.tokens:
+                usage = CallUsage("embedding", settings.embedding_model, summary.tokens)
+                session.add(usage.as_row())
             start = 0
             for record, chunks in chunked:
                 end = start + len(chunks)

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.guard import pg_guard
 from app.db.models import Conversation, Message
 
 TITLE_MAX_LENGTH = 60
@@ -36,8 +37,11 @@ class ConversationStore:
         )
         return list(result)
 
-    async def create(self, user_id: uuid.UUID) -> Conversation:
-        conversation = Conversation(id=uuid.uuid4(), user_id=user_id, title=None)
+    async def create(self, user_id: uuid.UUID, first_message: str) -> Conversation:
+        """Create a conversation, titled after its first message."""
+        conversation = Conversation(
+            id=uuid.uuid4(), user_id=user_id, title=conversation_title(first_message)
+        )
         self._session.add(conversation)
         await self._session.commit()
         return conversation
@@ -59,9 +63,20 @@ class ConversationStore:
         )
         return list(result)
 
-    async def mark_active(self, conversation: Conversation, message: str) -> None:
-        """Move the conversation to the top of the list, titled after its first message."""
-        if conversation.title is None:
-            conversation.title = conversation_title(message)
+    @pg_guard
+    async def log_command(self, conversation_id: uuid.UUID, command: str, reply: str) -> None:
+        """Add a chat command and its reply to the conversation's message log.
+
+        Like every message-log write, it is fail-open: a failed or slow write is logged and
+        skipped, so the command still gets its answer.
+        """
+        self._session.add_all(
+            Message(conversation_id=conversation_id, role=role, content=content, kind="command")
+            for role, content in [("user", command), ("assistant", reply)]
+        )
+        await self._session.commit()
+
+    async def mark_active(self, conversation: Conversation) -> None:
+        """Move the conversation to the top of the list."""
         conversation.updated_at = datetime.now(UTC)
         await self._session.commit()

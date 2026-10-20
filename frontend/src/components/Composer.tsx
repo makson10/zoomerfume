@@ -5,7 +5,8 @@ import { useState, type KeyboardEvent } from 'react'
 const MAX_MESSAGE_LENGTH = 4000
 
 interface ComposerProps {
-  onSend: (text: string) => void
+  /** Resolving to `false` means the message wasn't sent: the text comes back. */
+  onSend: (text: string) => void | Promise<boolean>
   /** When set, a Stop button replaces Send. */
   onStop?: () => void
   disabled: boolean
@@ -22,10 +23,13 @@ export function Composer({
   const [draft, setDraft] = useState('')
   const canSend = !disabled && draft.trim().length > 0
 
-  function send() {
+  async function send() {
     if (!canSend) return
-    onSend(draft.trim())
+    const text = draft.trim()
     setDraft('')
+    if ((await onSend(text)) === false) {
+      setDraft((current) => current || text)
+    }
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -35,7 +39,7 @@ export function Composer({
       !event.nativeEvent.isComposing
     ) {
       event.preventDefault()
-      send()
+      void send()
     }
   }
 
@@ -61,7 +65,7 @@ export function Composer({
       ) : (
         <ActionIcon
           size="input-sm"
-          onClick={send}
+          onClick={() => void send()}
           disabled={!canSend}
           aria-label="Send"
         >

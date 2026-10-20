@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 from app.agent.citations import Citations
 from app.agent.context import Step, TurnStatus
-from app.agent.runtime import NewTurn, TurnResult
+from app.agent.runtime import NewTurn, TurnResult, TurnStart
 from app.agent.streaming import Token, ToolCall, TurnEvent
-from app.db.models import Conversation, KbRecord, Message, ToolStep, Turn, User
+from app.db.models import Conversation, KbRecord, Message, Note, ToolStep, Turn, User
 from app.kb.search import Hit
 from app.services.conversations import conversation_title
+from app.services.usage import CallUsage, TurnUsage
 
 
 class FakeTurnRunner:
-    """Stands in for ``TurnRunner``: records each turn and streams a canned reply, status and
-    steps, then stores the turn like the real runner."""
+    """Stands in for ``TurnRunner``: records each turn and streams a canned reply, status,
+    steps and model calls, then stores the turn like the real runner."""
 
     reply = "fake reply"
     status: TurnStatus = "ok"
@@ -25,22 +27,26 @@ class FakeTurnRunner:
         self.calls: list[NewTurn] = []
         self.steps: list[Step] = []
         self.citations = Citations()
+        self.model_calls = [CallUsage("chat", "gpt-6-luna", 2000, 1800, 100, 50)]
 
     async def stream(
         self, turn: NewTurn, turns: FakeTurnStore
-    ) -> AsyncIterator[TurnEvent | TurnResult]:
+    ) -> AsyncIterator[TurnStart | TurnEvent | TurnResult]:
         self.calls.append(turn)
+        yield TurnStart(conversation_id=turn.conversation_id, turn_id=turn.id)
         for step in self.steps:
             yield ToolCall(tool=step.tool, args=step.args)
             yield step
         yield Token(text=self.reply)
-        await turns.finish(turn.id, self.status, self.citations, self.steps)
+        await turns.finish(turn.id, self.status, self.citations, self.steps, self.model_calls)
         yield TurnResult(
+            conversation_id=turn.conversation_id,
             turn_id=turn.id,
             reply=self.reply,
             status=self.status,
             citations=self.citations,
             steps=self.steps,
+            usage=TurnUsage.of(self.model_calls),
         )
 
 
@@ -75,13 +81,13 @@ class FakeConversationStore:
     async def list_for_user(self, user_id: uuid.UUID) -> list[Conversation]:
         return [c for c in self.conversations if c.user_id == user_id]
 
-    def add(self, user_id: uuid.UUID) -> Conversation:
-        conversation = Conversation(id=uuid.uuid4(), user_id=user_id, title=None)
+    def add(self, user_id: uuid.UUID, title: str = "hi") -> Conversation:
+        conversation = Conversation(id=uuid.uuid4(), user_id=user_id, title=title)
         self.conversations.insert(0, conversation)
         return conversation
 
-    async def create(self, user_id: uuid.UUID) -> Conversation:
-        return self.add(user_id)
+    async def create(self, user_id: uuid.UUID, first_message: str) -> Conversation:
+        return self.add(user_id, conversation_title(first_message))
 
     async def get_for_user(
         self, conversation_id: uuid.UUID, user_id: uuid.UUID
@@ -94,9 +100,14 @@ class FakeConversationStore:
     async def messages(self, conversation_id: uuid.UUID) -> list[Message]:
         return self.transcripts.get(conversation_id, [])
 
-    async def mark_active(self, conversation: Conversation, message: str) -> None:
-        if conversation.title is None:
-            conversation.title = conversation_title(message)
+    async def log_command(self, conversation_id: uuid.UUID, command: str, reply: str) -> None:
+        transcript = self.transcripts.setdefault(conversation_id, [])
+        for role, content in [("user", command), ("assistant", reply)]:
+            transcript.append(
+                Message(conversation_id=conversation_id, role=role, content=content, kind="command")
+            )
+
+    async def mark_active(self, conversation: Conversation) -> None:
         self.conversations.remove(conversation)
         self.conversations.insert(0, conversation)
 
@@ -140,14 +151,39 @@ class FakeKnowledgeBase:
 
     async def search(
         self, query: str, k: int, record_type: str | None, max_price: int | None
-    ) -> list[Hit]:
+    ) -> tuple[list[Hit], CallUsage]:
         self.searches.append((query, k, record_type, max_price))
         if self.error is not None:
             raise self.error
-        return self.hits[:k]
+        return self.hits[:k], CallUsage("embedding", "text-embedding-3-small", 8)
 
     async def get_record(self, record_id: str) -> KbRecord | None:
         return self.records.get(record_id)
+
+
+class FakeNoteStore:
+    """Stands in for ``NoteStore`` with notes kept in memory, the newest last."""
+
+    def __init__(self) -> None:
+        self.notes: list[Note] = []
+
+    async def add(
+        self, user_id: uuid.UUID, conversation_id: uuid.UUID, turn_id: uuid.UUID, text: str
+    ) -> Note:
+        note = Note(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            text=text,
+            status="confirmed",
+            created_at=datetime.now(UTC),
+        )
+        self.notes.append(note)
+        return note
+
+    async def list_for_user(self, user_id: uuid.UUID, limit: int) -> list[Note]:
+        return [note for note in reversed(self.notes) if note.user_id == user_id][:limit]
 
 
 def make_step(record_ids: list[str]) -> Step:
@@ -163,11 +199,13 @@ def make_step(record_ids: list[str]) -> Step:
 
 
 class FakeTurnStore:
-    """Stands in for ``TurnStore`` with turns and their steps kept in memory. Like the real
-    store, it starts no turn while another one in the conversation is running."""
+    """Stands in for ``TurnStore`` with turns, their steps and model calls kept in memory.
+    Like the real store, it starts no turn while another one in the conversation is
+    running."""
 
     def __init__(self) -> None:
         self.turns: dict[uuid.UUID, Turn] = {}
+        self.calls: dict[uuid.UUID, list[CallUsage]] = {}
 
     def add(
         self,
@@ -175,18 +213,31 @@ class FakeTurnStore:
         citations: Citations | None,
         steps: list[Step],
         status: str = "ok",
+        calls: list[CallUsage] | None = None,
+        started_at: datetime | None = None,
     ) -> Turn:
-        turn = Turn(id=uuid.uuid4(), conversation_id=conversation_id, status="running")
+        turn = Turn(
+            id=uuid.uuid4(),
+            conversation_id=conversation_id,
+            status="running",
+            started_at=started_at or datetime.now(UTC),
+        )
         self.turns[turn.id] = turn
-        self._finish(turn, status, citations, steps)
+        self._finish(turn, status, citations, steps, calls or [])
         return turn
 
     def _finish(
-        self, turn: Turn, status: str, citations: Citations | None, steps: list[Step]
+        self,
+        turn: Turn,
+        status: str,
+        citations: Citations | None,
+        steps: list[Step],
+        calls: list[CallUsage],
     ) -> None:
         turn.status = status
         turn.citations = citations.model_dump() if citations else None
         turn.steps = [ToolStep(turn_id=turn.id, **step.model_dump()) for step in steps]
+        self.calls[turn.id] = calls
 
     async def start(self, conversation_id: uuid.UUID) -> uuid.UUID | None:
         if any(
@@ -194,14 +245,24 @@ class FakeTurnStore:
             for turn in self.turns.values()
         ):
             return None
-        turn = Turn(id=uuid.uuid4(), conversation_id=conversation_id, status="running")
+        turn = Turn(
+            id=uuid.uuid4(),
+            conversation_id=conversation_id,
+            status="running",
+            started_at=datetime.now(UTC),
+        )
         self.turns[turn.id] = turn
         return turn.id
 
     async def finish(
-        self, turn_id: uuid.UUID, status: TurnStatus, citations: Citations, steps: list[Step]
+        self,
+        turn_id: uuid.UUID,
+        status: TurnStatus,
+        citations: Citations,
+        steps: list[Step],
+        calls: list[CallUsage],
     ) -> None:
-        self._finish(self.turns[turn_id], status, citations, steps)
+        self._finish(self.turns[turn_id], status, citations, steps, calls)
 
     async def retrieved_ids(self, conversation_id: uuid.UUID) -> set[str]:
         return {
@@ -214,3 +275,10 @@ class FakeTurnStore:
 
     async def for_conversation(self, conversation_id: uuid.UUID) -> list[Turn]:
         return [turn for turn in self.turns.values() if turn.conversation_id == conversation_id]
+
+    async def usage_by_turn(self, conversation_id: uuid.UUID) -> dict[uuid.UUID, TurnUsage]:
+        return {
+            turn_id: TurnUsage.of(calls)
+            for turn_id, calls in self.calls.items()
+            if calls and self.turns[turn_id].conversation_id == conversation_id
+        }

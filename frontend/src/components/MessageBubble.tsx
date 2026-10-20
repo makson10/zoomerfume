@@ -2,6 +2,7 @@ import { Code, Group, Loader, Paper, Stack, Text } from '@mantine/core'
 import { memo } from 'react'
 import type { ChatMessage } from '../hooks/useChat.ts'
 import { CitationChip } from './CitationChip.tsx'
+import { CostBadge } from './CostBadge.tsx'
 import { MarkdownText } from './MarkdownText.tsx'
 import { StepLog } from './StepLog.tsx'
 
@@ -14,7 +15,8 @@ interface MessageBubbleProps {
 /**
  * One chat message. It is memoized: while a reply streams, only the bubble whose
  * message changed re-renders and re-parses its Markdown. A reply that hasn't
- * written anything yet shows a loader and the tool Zoomer is using.
+ * written anything yet shows a loader and the tool Zoomer is using. A finished reply
+ * shows its step log and what its model calls cost.
  */
 export const MessageBubble = memo(function MessageBubble({
   message,
@@ -81,6 +83,9 @@ export const MessageBubble = memo(function MessageBubble({
           citations={citations}
           stopped={message.status === 'cancelled'}
         />
+      )}
+      {message.usage && message.usage.calls > 0 && (
+        <CostBadge usage={message.usage} />
       )}
     </Stack>
   )

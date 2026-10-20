@@ -1,0 +1,1208 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Zoomerfume API",
+    "description": "Chat API for Zoomer, the AI consultant of the Zoomerfume perfume shop.",
+    "version": "0.4.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health Check",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Check Health Get"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/phone": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign In With Phone",
+        "description": "Sign in a known customer by phone number, or ask a new one for their name.\n\nRaises:\n    ApiError: 422 ``INVALID_PHONE``, 429 over the sign-in rate limit.",
+        "operationId": "sign_in_with_phone_api_auth_phone_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/KnownPhone"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NewPhone"
+                    }
+                  ],
+                  "title": "Response Sign In With Phone Api Auth Phone Post"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/create": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Create Account",
+        "description": "Create an account for a new customer and sign them in.\n\nRaises:\n    ApiError: 422 ``INVALID_PHONE`` or ``INVALID_NAME``, 429 over the sign-in rate limit.",
+        "operationId": "create_account_api_auth_create_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignInResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Log Out",
+        "description": "Sign out. Works without a session too, so a stale cookie can always be cleared.",
+        "operationId": "log_out_api_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "description": "Client Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Me",
+        "description": "Return the signed-in user, or 401 if nobody is signed in.",
+        "operationId": "me_api_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/conversations": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "List Conversations",
+        "description": "Return the user's conversations, the most recently active first.",
+        "operationId": "list_conversations_api_conversations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConversationOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Conversations Api Conversations Get"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/conversations/{conversation_id}/messages": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "List Messages",
+        "description": "Return the conversation's transcript, oldest first.\n\nRaises:\n    ApiError: 404 when the conversation isn't the user's.",
+        "operationId": "list_messages_api_conversations__conversation_id__messages_get",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MessageOut"
+                  },
+                  "title": "Response List Messages Api Conversations  Conversation Id  Messages Get"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Client Error"
+          }
+        }
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Chat",
+        "description": "Return Zoomer's reply to one message in one of the user's conversations, or in a\nnew one.\n\nIt runs the same turn as ``/api/chat/stream`` and returns the stream's last event. A\nchat command such as ``/cost`` gets its reply as a ``TurnDone``.\n\nRaises:\n    ApiError: 401 when nobody is signed in, 429 over the rate limit, 404 when the\n        conversation isn't the user's, 409 while another reply in it is running.",
+        "operationId": "chat_api_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TurnResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TurnDone"
+                    }
+                  ],
+                  "title": "Response Chat Api Chat Post"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/stream": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Chat Stream",
+        "description": "Stream Zoomer's reply to one message as server-sent events.\n\n``start`` names the conversation and the turn, which is how the web chat learns the id\nof a new conversation. ``token`` events carry the reply as the model writes it, and each\ntool call sends ``tool_call`` and then ``tool_result`` with its step. The stream ends\nwith ``citation``, ``usage`` (the turn's tokens and cost) and ``done``. ``done`` carries\nthe stored reply, which replaces the streamed text, because the fallback and step-limit\ntexts are never streamed. ``error`` ends a stream that broke. Closing the connection\nstops the turn. A chat command such as ``/cost`` runs no turn: its stream is a single\n``done``.\n\nThe return type lists the events' data models for the OpenAPI schema. Each one is\nsent as a ``ServerSentEvent`` with its event name.\n\nRaises:\n    ApiError: Before the stream starts, the same errors as ``/api/chat``.",
+        "operationId": "chat_stream_api_chat_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "string",
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/components/schemas/TurnStart"
+                          },
+                          {
+                            "$ref": "#/components/schemas/Token"
+                          },
+                          {
+                            "$ref": "#/components/schemas/ToolCall"
+                          },
+                          {
+                            "$ref": "#/components/schemas/Step"
+                          },
+                          {
+                            "$ref": "#/components/schemas/Citations"
+                          },
+                          {
+                            "$ref": "#/components/schemas/TurnUsage"
+                          },
+                          {
+                            "$ref": "#/components/schemas/TurnDone"
+                          },
+                          {
+                            "$ref": "#/components/schemas/ErrorDetail"
+                          }
+                        ],
+                        "title": "Streamitem Chat Stream Api Chat Stream Post"
+                      }
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "retry": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/records/{record_id}": {
+      "get": {
+        "tags": [
+          "records"
+        ],
+        "summary": "Get Record",
+        "description": "Return one knowledge base record in full.\n\nRaises:\n    ApiError: 401 when nobody is signed in, 404 when there is no record with this id.",
+        "operationId": "get_record_api_records__record_id__get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Client Error"
+          }
+        }
+      }
+    },
+    "/api/tools/schema": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "Tool Schemas",
+        "description": "Return every tool the agent can call, read straight from the tools built for the user.",
+        "operationId": "tool_schemas_api_tools_schema_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ToolSchema"
+                  },
+                  "type": "array",
+                  "title": "Response Tool Schemas Api Tools Schema Get"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notes": {
+      "get": {
+        "tags": [
+          "notes"
+        ],
+        "summary": "List Notes",
+        "description": "Return the user's notes, the newest first, at most :data:`NOTES_LIMIT` of them.",
+        "operationId": "list_notes_api_notes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NoteOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Notes Api Notes Get"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ChatRequest": {
+        "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "ChatRequest"
+      },
+      "Citations": {
+        "properties": {
+          "valid": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Valid",
+            "default": []
+          },
+          "invalid": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Invalid",
+            "default": []
+          },
+          "missing": {
+            "type": "boolean",
+            "title": "Missing",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid",
+          "invalid",
+          "missing"
+        ],
+        "title": "Citations",
+        "description": "The citations of one answer, checked against the records the tools returned.\n\n``Citations()`` is an answer that cites nothing."
+      },
+      "ConversationOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "ConversationOut",
+        "description": "A conversation in the list, titled after its first message."
+      },
+      "CreateUserRequest": {
+        "properties": {
+          "phone": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Phone"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phone",
+          "name"
+        ],
+        "title": "CreateUserRequest"
+      },
+      "ErrorBody": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorBody",
+        "description": "The body of every API error response."
+      },
+      "ErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorDetail",
+        "description": "What went wrong: a stable code and a short text for the customer."
+      },
+      "KnownPhone": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "known",
+            "title": "Status"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "user",
+          "message"
+        ],
+        "title": "KnownPhone",
+        "description": "The number belongs to a customer, who is now signed in."
+      },
+      "MessageOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "turn_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turn Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "max_steps",
+                  "cancelled",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "citations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Citations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/Step"
+            },
+            "type": "array",
+            "title": "Steps",
+            "default": []
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "content",
+          "turn_id",
+          "status",
+          "citations",
+          "steps",
+          "usage"
+        ],
+        "title": "MessageOut",
+        "description": "One logged message of a conversation's transcript.\n\nZoomer's replies also carry how their turn ended, their checked citations, the tool\ncalls behind them and what the turn's model calls cost."
+      },
+      "NewPhone": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "need_name",
+            "title": "Status"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "phone",
+          "message"
+        ],
+        "title": "NewPhone",
+        "description": "A new number: the customer gives a name next, to create the account."
+      },
+      "NoteOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "text",
+          "created_at"
+        ],
+        "title": "NoteOut",
+        "description": "One of the customer's notes."
+      },
+      "PhoneRequest": {
+        "properties": {
+          "phone": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Phone"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phone"
+        ],
+        "title": "PhoneRequest"
+      },
+      "RecordOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "product",
+              "policy",
+              "company",
+              "faq",
+              "news"
+            ],
+            "title": "Type"
+          },
+          "updated": {
+            "type": "string",
+            "format": "date",
+            "title": "Updated"
+          },
+          "header": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Header"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "type",
+          "updated",
+          "header",
+          "body"
+        ],
+        "title": "RecordOut",
+        "description": "A full knowledge base record: its header fields and its Markdown body."
+      },
+      "SignInResponse": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user",
+          "message"
+        ],
+        "title": "SignInResponse"
+      },
+      "Step": {
+        "properties": {
+          "step": {
+            "type": "integer",
+            "title": "Step"
+          },
+          "tool": {
+            "type": "string",
+            "title": "Tool"
+          },
+          "args": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Args"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "record_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Record Ids"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "title": "Duration Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step",
+          "tool",
+          "args",
+          "success",
+          "code",
+          "record_ids",
+          "duration_ms"
+        ],
+        "title": "Step",
+        "description": "One tool call the agent made during a turn, as the step log shows it."
+      },
+      "Token": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "Token",
+        "description": "A piece of Zoomer's reply, as the model writes it."
+      },
+      "ToolCall": {
+        "properties": {
+          "tool": {
+            "type": "string",
+            "title": "Tool"
+          },
+          "args": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Args"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool",
+          "args"
+        ],
+        "title": "ToolCall",
+        "description": "The model called a tool. The tool's result follows as a :class:`Step`."
+      },
+      "ToolSchema": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters"
+          },
+          "strict": {
+            "type": "boolean",
+            "title": "Strict"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "parameters",
+          "strict"
+        ],
+        "title": "ToolSchema",
+        "description": "One tool: its name, the description and the JSON schema of its arguments."
+      },
+      "TurnDone": {
+        "properties": {
+          "turn_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turn Id"
+          },
+          "reply": {
+            "type": "string",
+            "title": "Reply"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "max_steps",
+              "cancelled",
+              "failed"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "turn_id",
+          "reply",
+          "status"
+        ],
+        "title": "TurnDone",
+        "description": "The ``done`` event: the stored reply, which replaces the streamed text.\n\nIt is also the whole answer to a chat command such as ``/cost``, which runs no turn."
+      },
+      "TurnResult": {
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Conversation Id"
+          },
+          "turn_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Turn Id"
+          },
+          "reply": {
+            "type": "string",
+            "title": "Reply"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "max_steps",
+              "cancelled",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "citations": {
+            "$ref": "#/components/schemas/Citations"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/Step"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/TurnUsage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "turn_id",
+          "reply",
+          "status",
+          "citations",
+          "steps",
+          "usage"
+        ],
+        "title": "TurnResult",
+        "description": "Zoomer's reply to one message, with how the turn ended, its checked citations, the\ntool calls behind it and what its model calls cost."
+      },
+      "TurnStart": {
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Conversation Id"
+          },
+          "turn_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Turn Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "turn_id"
+        ],
+        "title": "TurnStart",
+        "description": "The first event of a turn: the conversation and the turn the reply belongs to."
+      },
+      "TurnUsage": {
+        "properties": {
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "title": "Cached Tokens"
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "title": "Cache Write Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "cost_usd": {
+            "type": "string",
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calls",
+          "input_tokens",
+          "cached_tokens",
+          "cache_write_tokens",
+          "output_tokens",
+          "cost_usd"
+        ],
+        "title": "TurnUsage",
+        "description": "What one turn's model calls used and cost.\n\nThe calls and tokens are the chat model's. The cost also covers the embeddings of the\nturn's searches."
+      },
+      "UserOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "phone_masked": {
+            "type": "string",
+            "title": "Phone Masked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "phone_masked"
+        ],
+        "title": "UserOut",
+        "description": "The signed-in user as the web chat sees them. The phone is masked."
+      }
+    }
+  }
+}

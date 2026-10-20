@@ -9,7 +9,10 @@ from fastapi.testclient import TestClient
 
 from app.agent.citations import Citations
 from app.agent.runtime import FALLBACK_TEXT
+from app.core.config import Settings
 from app.db.models import User
+from app.services.cost_report import NOTHING_YET
+from app.services.usage import CallUsage
 from tests.fakes import (
     FakeConversationStore,
     FakeRateLimiter,
@@ -25,6 +28,17 @@ def test_health_returns_ok(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+# The usage of the fake runner's one model call.
+USAGE = {
+    "calls": 1,
+    "input_tokens": 2000,
+    "cached_tokens": 1800,
+    "cache_write_tokens": 100,
+    "output_tokens": 50,
+    "cost_usd": "0.000065500",
+}
 
 
 def test_chat_runs_a_turn_and_returns_its_result(
@@ -51,14 +65,15 @@ def test_chat_runs_a_turn_and_returns_its_result(
         {"KB-012"},
     )
     assert response.json() == {
+        "conversation_id": str(conversation.id),
         "turn_id": str(turn.id),
         "reply": "fake reply",
         "status": "ok",
         "citations": {"valid": [], "invalid": [], "missing": False},
         "steps": [make_step(["KB-031"]).model_dump()],
+        "usage": USAGE,
     }
     assert fake_turns.turns[turn.id].status == "ok"
-    assert conversation.title == "hi"
 
 
 def _events(stream: str) -> list[tuple[str, Any]]:
@@ -90,12 +105,43 @@ def test_chat_stream_sends_the_turn_as_events(
     assert response.headers["cache-control"] == "no-cache"
     turn_id = str(fake_runner.calls[0].id)
     assert _events(response.text) == [
+        ("start", {"conversation_id": str(conversation.id), "turn_id": turn_id}),
         ("tool_call", {"tool": "search_kb", "args": {"query": "vanilla"}}),
         ("tool_result", step.model_dump()),
         ("token", {"text": "fake reply"}),
         ("citation", {"valid": ["KB-031"], "invalid": [], "missing": False}),
+        ("usage", USAGE),
         ("done", {"turn_id": turn_id, "status": "ok", "reply": "fake reply"}),
     ]
+
+
+def test_cost_command_answers_from_the_stored_calls_without_a_turn(
+    client: TestClient,
+    settings: Settings,
+    user: User,
+    fake_conversations: FakeConversationStore,
+    fake_turns: FakeTurnStore,
+    fake_runner: FakeTurnRunner,
+) -> None:
+    settings.message_log_enabled = True
+    conversation = fake_conversations.add(user.id)
+    call = CallUsage("chat", "gpt-6-luna", 2000, 0, 1800, 40)
+    fake_turns.add(conversation.id, citations=None, steps=[], calls=[call])
+
+    response = client.post(
+        "/api/chat/stream", json={"conversation_id": str(conversation.id), "message": "/cost"}
+    )
+    new_chat = client.post("/api/chat", json={"message": "/COST"})
+
+    [(event, data)] = _events(response.text)
+    assert (event, data["turn_id"], data["status"]) == ("done", None, "ok")
+    assert "| 1 | " in data["reply"] and "$0.000265" in data["reply"]
+    assert new_chat.json() == {"turn_id": None, "reply": NOTHING_YET, "status": "ok"}
+    assert fake_runner.calls == []
+    assert len(fake_turns.turns) == 1
+    assert len(fake_conversations.conversations) == 1
+    logged = fake_conversations.transcripts[conversation.id]
+    assert [(m.role, m.kind) for m in logged] == [("user", "command"), ("assistant", "command")]
 
 
 def test_chat_stream_ends_with_an_error_event_when_the_turn_breaks(
@@ -128,9 +174,9 @@ def test_chat_stream_ends_with_an_error_event_when_the_turn_breaks(
     [
         {"conversation_id": str(uuid.uuid4()), "message": "   "},
         {"conversation_id": str(uuid.uuid4()), "message": "x" * 4001},
-        {"message": "hi"},
+        {"conversation_id": "KB-012", "message": "hi"},
     ],
-    ids=["blank-message", "message-too-long", "missing-conversation-id"],
+    ids=["blank-message", "message-too-long", "bad-conversation-id"],
 )
 def test_chat_rejects_invalid_body(
     client: TestClient, user: User, fake_runner: FakeTurnRunner, body: dict[str, str]
@@ -189,6 +235,29 @@ def test_chat_over_the_rate_limit_gets_429(
     assert fake_runner.calls == []
 
 
+def test_a_first_message_starts_a_conversation_unless_it_is_refused(
+    client: TestClient,
+    user: User,
+    fake_conversations: FakeConversationStore,
+    fake_limiter: FakeRateLimiter,
+    fake_runner: FakeTurnRunner,
+) -> None:
+    fake_limiter.retry_after = 42
+    refused = client.post("/api/chat/stream", json={"message": "vanilla for winter?"})
+    fake_limiter.retry_after = None
+    response = client.post("/api/chat/stream", json={"message": "vanilla for winter?"})
+
+    assert refused.status_code == 429
+    [conversation] = fake_conversations.conversations
+    assert (conversation.user_id, conversation.title) == (user.id, "vanilla for winter?")
+    [turn] = fake_runner.calls
+    assert (turn.conversation_id, turn.retrieved_before) == (conversation.id, set())
+    assert _events(response.text)[0] == (
+        "start",
+        {"conversation_id": str(conversation.id), "turn_id": str(turn.id)},
+    )
+
+
 @pytest.mark.parametrize("path", ["/api/chat", "/api/chat/stream"])
 def test_chat_refuses_a_message_while_a_reply_is_running(
     client: TestClient,
@@ -206,4 +275,3 @@ def test_chat_refuses_a_message_while_a_reply_is_running(
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "REPLY_IN_PROGRESS"
     assert fake_runner.calls == []
-    assert conversation.title is None

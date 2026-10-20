@@ -31,7 +31,7 @@ export function ConversationList({
         {conversations.map((conversation) => (
           <NavLink
             key={conversation.id}
-            label={conversation.title ?? 'New chat'}
+            label={conversation.title}
             leftSection={<IconMessage size={16} />}
             active={conversation.id === activeId}
             disabled={disabled}
