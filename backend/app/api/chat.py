@@ -101,7 +101,9 @@ async def answer_cost_command(
     if body.conversation_id is None:
         return TurnDone(turn_id=None, reply=NOTHING_YET, status="ok")
     conversation = await require_conversation(conversations, body.conversation_id, user)
-    report = cost_report(await turns.for_conversation(conversation.id))
+    report = cost_report(
+        await turns.for_conversation(conversation.id), await turns.usage_by_turn(conversation.id)
+    )
     if log:
         await conversations.log_command(conversation.id, body.message, report)
     return TurnDone(turn_id=None, reply=report, status="ok")

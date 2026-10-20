@@ -77,14 +77,16 @@ async def list_conversations(
     ]
 
 
-def _message_out(message: Message, turn: Turn | None) -> MessageOut:
+def _message_out(
+    message: Message, turn: Turn | None, usage: dict[uuid.UUID, TurnUsage]
+) -> MessageOut:
     out = MessageOut.model_validate(message)
     if message.role == "assistant" and turn is not None:
         out.status = turn.status
         if turn.citations is not None:
             out.citations = Citations.model_validate(turn.citations)
         out.steps = [Step.model_validate(step) for step in turn.steps]
-        out.usage = TurnUsage.of(turn.calls)
+        out.usage = usage.get(turn.id, TurnUsage.of([]))
     return out
 
 
@@ -99,7 +101,8 @@ async def list_messages(
     """
     conversation = await require_conversation(conversations, conversation_id, user)
     turns_by_id = {turn.id: turn for turn in await turns.for_conversation(conversation.id)}
+    usage = await turns.usage_by_turn(conversation.id)
     return [
-        _message_out(message, turns_by_id.get(message.turn_id))
+        _message_out(message, turns_by_id.get(message.turn_id), usage)
         for message in await conversations.messages(conversation.id)
     ]

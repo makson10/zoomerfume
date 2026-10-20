@@ -69,8 +69,8 @@ class TurnUsage(BaseModel):
     cost_usd: Usd
 
     @classmethod
-    def of(cls, calls: Sequence[CallUsage | LlmCall]) -> TurnUsage:
-        """Sum up a turn's calls, from the turn itself or from the ``llm_calls`` table."""
+    def of(cls, calls: Sequence[CallUsage]) -> TurnUsage:
+        """Sum up a turn's calls."""
         chat = [call for call in calls if call.kind == "chat"]
         return cls(
             calls=len(chat),
@@ -79,4 +79,16 @@ class TurnUsage(BaseModel):
             cache_write_tokens=sum(call.cache_write_tokens for call in chat),
             output_tokens=sum(call.output_tokens for call in chat),
             cost_usd=sum((call.cost_usd for call in calls), Decimal(0)),
+        )
+
+    @classmethod
+    def total(cls, usages: Sequence[TurnUsage]) -> TurnUsage:
+        """Add up the usage of several turns, e.g. a whole conversation."""
+        return cls(
+            calls=sum(usage.calls for usage in usages),
+            input_tokens=sum(usage.input_tokens for usage in usages),
+            cached_tokens=sum(usage.cached_tokens for usage in usages),
+            cache_write_tokens=sum(usage.cache_write_tokens for usage in usages),
+            output_tokens=sum(usage.output_tokens for usage in usages),
+            cost_usd=sum((usage.cost_usd for usage in usages), Decimal(0)),
         )

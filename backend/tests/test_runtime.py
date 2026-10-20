@@ -152,8 +152,9 @@ async def test_turn_runner_streams_a_tool_call_and_checks_citations(
     assert result.citations == Citations(valid=["KB-031", "KB-012"], invalid=["KB-099"])
     stored = fake_turns.turns[turn.id]
     assert (stored.status, stored.citations) == ("ok", result.citations.model_dump())
-    assert sorted(call.kind for call in stored.calls) == ["chat", "chat", "embedding"]
-    assert result.usage == TurnUsage.of(stored.calls)
+    calls = fake_turns.calls[turn.id]
+    assert sorted(call.kind for call in calls) == ["chat", "chat", "embedding"]
+    assert result.usage == TurnUsage.of(calls)
     assert (result.usage.calls, result.usage.cached_tokens) == (2, 3600)
     model.assert_complete()
 

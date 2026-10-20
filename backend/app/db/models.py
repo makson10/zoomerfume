@@ -109,7 +109,6 @@ class Turn(Base):
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     steps: Mapped[list[ToolStep]] = relationship(order_by="ToolStep.step", lazy="raise")
-    calls: Mapped[list[LlmCall]] = relationship(lazy="raise")
 
     __table_args__ = (
         Index("ix_turns_conversation_id", "conversation_id"),

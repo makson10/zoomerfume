@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import uuid
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
 
 from app.agent.input_filter import SHOP_TIMEZONE
@@ -36,21 +37,24 @@ def _usd(amount: Decimal) -> str:
     return f"${amount:.6f}"
 
 
-def cost_report(turns: Sequence[Turn]) -> str:
+def cost_report(turns: Sequence[Turn], usage: Mapping[uuid.UUID, TurnUsage]) -> str:
     """Return the conversation's cost per turn and in total, with the share read from cache.
 
     Args:
-        turns: The conversation's turns, oldest first, with their model calls loaded. Turns
-            that are still running are left out, because their calls aren't stored yet.
+        turns: The conversation's turns, oldest first. Turns that are still running are left
+            out, because their calls aren't stored yet.
+        usage: What each turn used and cost, by turn id. A turn without an entry made no
+            model call.
     """
     finished = [turn for turn in turns if turn.status != "running"]
     if not finished:
         return NOTHING_YET
+    usages = [usage.get(turn.id, TurnUsage.of([])) for turn in finished]
     rows = []
-    for number, turn in enumerate(finished, start=1):
+    for number, (turn, turn_usage) in enumerate(zip(finished, usages, strict=True), start=1):
         started = turn.started_at.astimezone(SHOP_TIMEZONE)
-        rows.append(_row(str(number), f"{started:%H:%M}", TurnUsage.of(turn.calls)))
-    total = TurnUsage.of([call for turn in finished for call in turn.calls])
+        rows.append(_row(str(number), f"{started:%H:%M}", turn_usage))
+    total = TurnUsage.total(usages)
     hit_rate = total.cached_tokens / total.input_tokens if total.input_tokens else 0
     return "\n".join(
         [

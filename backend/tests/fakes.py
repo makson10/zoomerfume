@@ -205,6 +205,7 @@ class FakeTurnStore:
 
     def __init__(self) -> None:
         self.turns: dict[uuid.UUID, Turn] = {}
+        self.calls: dict[uuid.UUID, list[CallUsage]] = {}
 
     def add(
         self,
@@ -236,7 +237,7 @@ class FakeTurnStore:
         turn.status = status
         turn.citations = citations.model_dump() if citations else None
         turn.steps = [ToolStep(turn_id=turn.id, **step.model_dump()) for step in steps]
-        turn.calls = [call.as_row(turn.id) for call in calls]
+        self.calls[turn.id] = calls
 
     async def start(self, conversation_id: uuid.UUID) -> uuid.UUID | None:
         if any(
@@ -274,3 +275,10 @@ class FakeTurnStore:
 
     async def for_conversation(self, conversation_id: uuid.UUID) -> list[Turn]:
         return [turn for turn in self.turns.values() if turn.conversation_id == conversation_id]
+
+    async def usage_by_turn(self, conversation_id: uuid.UUID) -> dict[uuid.UUID, TurnUsage]:
+        return {
+            turn_id: TurnUsage.of(calls)
+            for turn_id, calls in self.calls.items()
+            if calls and self.turns[turn_id].conversation_id == conversation_id
+        }
