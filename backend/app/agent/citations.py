@@ -11,14 +11,17 @@ CITATION = re.compile(r"\[(KB-\d{3})\]")
 
 
 class Citations(BaseModel):
-    """The citations of one answer, checked against the records the tools returned."""
+    """The citations of one answer, checked against the records the tools returned.
+
+    ``Citations()`` is an answer that cites nothing.
+    """
 
     # Cited records that a tool returned in this conversation, in the order first cited.
-    valid: list[str]
+    valid: list[str] = []
     # Cited ids that no tool returned in this conversation.
-    invalid: list[str]
+    invalid: list[str] = []
     # True when this turn retrieved records and the answer cites none of them.
-    missing: bool
+    missing: bool = False
 
 
 def check_citations(answer: str, retrieved_now: set[str], retrieved_before: set[str]) -> Citations:

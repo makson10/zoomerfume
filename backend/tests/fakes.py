@@ -3,31 +3,45 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 
 from app.agent.citations import Citations
 from app.agent.context import Step, TurnStatus
-from app.agent.runtime import TurnResult
+from app.agent.runtime import NewTurn, TurnResult
+from app.agent.streaming import Token, ToolCall, TurnEvent
 from app.db.models import Conversation, KbRecord, Message, ToolStep, Turn, User
 from app.kb.search import Hit
 from app.services.conversations import conversation_title
 
 
 class FakeTurnRunner:
-    """Stands in for ``TurnRunner``: records each call and returns a canned reply, status and
-    steps."""
+    """Stands in for ``TurnRunner``: records each turn and streams a canned reply, status and
+    steps, then stores the turn like the real runner."""
 
     reply = "fake reply"
     status: TurnStatus = "ok"
 
     def __init__(self) -> None:
-        self.calls: list[tuple[uuid.UUID, str, str]] = []
+        self.calls: list[NewTurn] = []
         self.steps: list[Step] = []
+        self.citations = Citations()
 
-    async def run(
-        self, turn_id: uuid.UUID, conversation_id: uuid.UUID, user_name: str, text: str
-    ) -> TurnResult:
-        self.calls.append((conversation_id, user_name, text))
-        return TurnResult(reply=self.reply, status=self.status, steps=self.steps)
+    async def stream(
+        self, turn: NewTurn, turns: FakeTurnStore
+    ) -> AsyncIterator[TurnEvent | TurnResult]:
+        self.calls.append(turn)
+        for step in self.steps:
+            yield ToolCall(tool=step.tool, args=step.args)
+            yield step
+        yield Token(text=self.reply)
+        await turns.finish(turn.id, self.status, self.citations, self.steps)
+        yield TurnResult(
+            turn_id=turn.id,
+            reply=self.reply,
+            status=self.status,
+            citations=self.citations,
+            steps=self.steps,
+        )
 
 
 class FakeUserStore:
