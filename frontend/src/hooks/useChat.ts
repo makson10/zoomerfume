@@ -52,7 +52,8 @@ function toChatMessage(message: StoredMessage): ChatMessage {
  *
  * The most recent conversation opens on load. "New chat" only clears the view;
  * the conversation is created when its first message is sent. Replies stream in
- * token by token, and `stop()` cancels the one in progress.
+ * token by token. `stop()` cancels the one in progress, and so does unmounting,
+ * for example on log out.
  */
 export function useChat() {
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -85,6 +86,8 @@ export function useChat() {
       ignore = true
     }
   }, [])
+
+  useEffect(() => () => replyRequest.current?.abort(), [])
 
   async function openConversation(id: string) {
     setActiveId(id)
