@@ -17,10 +17,11 @@ HEADER = (
     "|---:|---|---:|---:|---:|---:|---:|---:|"
 )
 FOOTNOTE = (
-    "Turn 1 couldn't read from the cache: each chat has its own cache key, so its first "
-    "call writes the prompt to the cache. Later turns read it back, with the history before "
-    "them, at a tenth of the input price. Calls and tokens are the chat model's; the cost "
-    "also covers the search embeddings."
+    "Turn 1 starts with a cache write: each chat has its own cache key, so its first call "
+    "has nothing to read and writes the prompt and the message to the cache instead. Every "
+    "later call, in turn 1 or after it, reads what came before at a tenth of the input "
+    "price. Calls and tokens are the chat model's; the cost also covers the search "
+    "embeddings."
 )
 
 

@@ -146,7 +146,7 @@ OpenAI caches the longest prefix a request shares with an earlier request under 
 
 The filter only shapes what is sent. The SDK stores the history without the static prompt and the note, so the stored items never change. The tool schemas come before the input and don't depend on the customer either.
 
-Caching mode stays `implicit`: next to the explicit breakpoint, OpenAI puts one at the end of the newest user message or tool output. The note sits after it, so it never becomes part of a cached prefix. The next call, in this turn or the next one, reads everything up to that point and writes only what is new. The explicit breakpoint keeps the static prompt cached on its own, which still helps when the history window slides and the prefix after the prompt changes. The request's `prompt_cache_key` is `conversation:<id>`, so a conversation's first call can't read anything and writes the prefix instead; `/cost` explains that in a footnote.
+Caching mode stays `implicit`: next to the explicit breakpoint, OpenAI puts one at the end of the newest user message or tool output. The note sits after it, so it never becomes part of a cached prefix. The next call, in this turn or the next one, reads everything up to that point and writes only what is new. The explicit breakpoint keeps the static prompt cached on its own, which still helps when the history window slides and the prefix after the prompt changes. The request's `prompt_cache_key` is `conversation:<id>`, so a conversation's first call can't read anything and writes the prefix instead, while a second call in the same turn already reads it; `/cost` explains that in a footnote.
 
 ## Usage and cost
 
@@ -158,7 +158,7 @@ The transcript returns each reply's `usage`, so the cost under an answer survive
 
 ## `/cost`
 
-A message that is exactly `/cost` (any case) is a command, not a question. The route's `start_reply` dependency answers it before any turn starts: `cost_report()` (`app/services/cost_report.py`) builds a Markdown table from the conversation's finished turns and their `llm_calls` rows, with one row per turn (time in Kyiv, chat calls, input, cached, cache-write and output tokens, cost), the total, the share of input tokens read from the cache and a footnote on why turn 1 had nothing to read. No model is called, no turn is stored, and nothing reaches the agent history. The command and the report go to the message log with `kind = command`, so the transcript shows them. The stream sends a single `done` with `turn_id: null`; `POST /api/chat` returns the same object. In a new chat there is nothing to count, so `/cost` answers that and creates nothing.
+A message that is exactly `/cost` (any case) is a command, not a question. The route's `start_reply` dependency answers it before any turn starts: `cost_report()` (`app/services/cost_report.py`) builds a Markdown table from the conversation's finished turns and their `llm_calls` rows, with one row per turn (time in Kyiv, chat calls, input, cached, cache-write and output tokens, cost), the total, the share of input tokens read from the cache and a footnote on why turn 1 starts with a cache write. No model is called, no turn is stored, and nothing reaches the agent history. The command and the report go to the message log with `kind = command`, so the transcript shows them. The stream sends a single `done` with `turn_id: null`; `POST /api/chat` returns the same object. In a new chat there is nothing to count, so `/cost` answers that and creates nothing.
 
 ## What is stored
 

@@ -94,7 +94,7 @@ How the prompt gets cached:
 - Everything volatile comes last. The current Kyiv time and the customer's name are a developer note at the very end of each call's input, and the note is never stored. Search results are tool outputs in the history. So each request repeats the previous one up to its newest messages, and OpenAI's implicit breakpoint at the end of the newest user message or tool output lets the next call read all of it from the cache.
 - Every request carries `prompt_cache_key = conversation:<id>`, so each conversation has its own cache.
 
-**Why turn 1 can't read from the cache:** a new conversation has a new cache key, so nothing is cached for it yet. Its first call writes the prompt and the message to the cache, billed at 1.25× the input price. Every later call reads what came before at a tenth of the input price and writes only what is new. A live conversation:
+**Why turn 1 starts with a cache write:** a new conversation has a new cache key, so nothing is cached for it yet. Its first call has nothing to read and writes the prompt and the message to the cache, billed at 1.25× the input price. Every later call, including a second call in turn 1 after a tool, reads what came before at a tenth of the input price and writes only what is new. A live conversation:
 
 | Turn | Message | Calls | Input | Cached | Cache write | Cost |
 |---:|---|---:|---:|---:|---:|---:|
