@@ -12,12 +12,13 @@ from fastapi import APIRouter, Depends, status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agent.context import Step
-from app.agent.runtime import FALLBACK_TEXT, NewTurn, TurnResult
+from app.agent.citations import Citations
+from app.agent.context import Step, TurnStatus
+from app.agent.runtime import FALLBACK_TEXT, NewTurn, TurnResult, TurnStart
 from app.agent.streaming import Token, ToolCall
 from app.api.conversations import require_conversation
 from app.api.deps import Conversations, CurrentUser, Runtime, Turns, limit_chat
-from app.api.errors import ApiError
+from app.api.errors import ApiError, ErrorDetail
 
 logger = logging.getLogger(__name__)
 
@@ -27,25 +28,45 @@ router = APIRouter(prefix="/api", tags=["chat"])
 class ChatRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    conversation_id: uuid.UUID
+    # Leave it out to start a new conversation with this message.
+    conversation_id: uuid.UUID | None = None
     message: str = Field(min_length=1, max_length=4000)
+
+
+class TurnDone(BaseModel):
+    """The ``done`` event: the stored reply, which replaces the streamed text."""
+
+    turn_id: uuid.UUID
+    reply: str
+    status: TurnStatus
+
+
+# The ``data`` of each stream event, in event order: start, token, tool_call, tool_result,
+# citation, done, or error.
+ChatEventData = TurnStart | Token | ToolCall | Step | Citations | TurnDone | ErrorDetail
 
 
 async def start_turn(
     body: ChatRequest, user: CurrentUser, conversations: Conversations, turns: Turns
 ) -> NewTurn:
-    """Start a turn for the message in one of the user's conversations.
+    """Start a turn for the message in one of the user's conversations, or in a new one.
 
     It runs as a dependency, before a streamed reply sends anything, so its errors are
-    plain HTTP errors. The reads come first and both writes commit, so no transaction
-    stays open on the request's session while the turn runs.
+    plain HTTP errors. A new conversation is created only here, after the sign-in and
+    rate limit checks, so a refused message leaves no empty chat behind. The reads come
+    first and every write commits, so no transaction stays open on the request's session
+    while the turn runs.
 
     Raises:
         ApiError: 404 when the conversation isn't the user's, 409 while Zoomer is still
             answering another message in it.
     """
-    conversation = await require_conversation(conversations, body.conversation_id, user)
-    retrieved_before = await turns.retrieved_ids(conversation.id)
+    if body.conversation_id is None:
+        conversation = await conversations.create(user.id, body.message)
+        retrieved_before: set[str] = set()
+    else:
+        conversation = await require_conversation(conversations, body.conversation_id, user)
+        retrieved_before = await turns.retrieved_ids(conversation.id)
     turn_id = await turns.start(conversation.id)
     if turn_id is None:
         raise ApiError(
@@ -54,16 +75,23 @@ async def start_turn(
             "I'm still answering your last message in this chat. "
             "Wait for my reply or stop it, then send this one again.",
         )
-    await conversations.mark_active(conversation, body.message)
-    return NewTurn(turn_id, conversation.id, user.name, body.message, retrieved_before)
+    await conversations.mark_active(conversation)
+    return NewTurn(turn_id, conversation.id, user.id, user.name, body.message, retrieved_before)
 
 
 StartedTurn = Annotated[NewTurn, Depends(start_turn)]
 
+# FastAPI documents a response model in the route's media type, but errors are JSON
+# even on the stream route.
+STREAM_ERROR_RESPONSES = {
+    "4XX": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorBody"}}}}
+}
+
 
 @router.post("/chat", dependencies=[Depends(limit_chat)])
 async def chat(turn: StartedTurn, turns: Turns, runner: Runtime) -> TurnResult:
-    """Return Zoomer's reply to one message in one of the user's conversations.
+    """Return Zoomer's reply to one message in one of the user's conversations, or in a
+    new one.
 
     It runs the same turn as ``/api/chat/stream`` and returns the stream's last event.
 
@@ -75,17 +103,27 @@ async def chat(turn: StartedTurn, turns: Turns, runner: Runtime) -> TurnResult:
     return events[-1]
 
 
-@router.post("/chat/stream", response_class=EventSourceResponse, dependencies=[Depends(limit_chat)])
+@router.post(
+    "/chat/stream",
+    response_class=EventSourceResponse,
+    responses=STREAM_ERROR_RESPONSES,
+    dependencies=[Depends(limit_chat)],
+)
 async def chat_stream(
     turn: StartedTurn, turns: Turns, runner: Runtime
-) -> AsyncIterator[ServerSentEvent]:
+) -> AsyncIterator[ChatEventData]:
     """Stream Zoomer's reply to one message as server-sent events.
 
-    ``token`` events carry the reply as the model writes it, and each tool call sends
+    ``start`` names the conversation and the turn, which is how the web chat learns the id
+    of a new conversation. ``token`` events carry the reply as the model writes it, and each
+    tool call sends
     ``tool_call`` and then ``tool_result`` with its step. The stream ends with
     ``citation`` and ``done``. ``done`` carries the stored reply, which replaces the
     streamed text, because the fallback and step-limit texts are never streamed.
     ``error`` ends a stream that broke. Closing the connection stops the turn.
+
+    The return type lists the events' data models for the OpenAPI schema. Each one is
+    sent as a ``ServerSentEvent`` with its event name.
 
     Raises:
         ApiError: Before the stream starts, the same errors as ``/api/chat``.
@@ -94,6 +132,8 @@ async def chat_stream(
         async with aclosing(runner.stream(turn, turns)) as events:
             async for event in events:
                 match event:
+                    case TurnStart():
+                        yield ServerSentEvent(event="start", data=event)
                     case Token():
                         yield ServerSentEvent(event="token", data=event)
                     case ToolCall():
@@ -102,9 +142,11 @@ async def chat_stream(
                         yield ServerSentEvent(event="tool_result", data=event)
                     case TurnResult():
                         yield ServerSentEvent(event="citation", data=event.citations)
-                        done = event.model_dump_json(include={"turn_id", "status", "reply"})
-                        yield ServerSentEvent(event="done", raw_data=done)
+                        done = TurnDone(
+                            turn_id=event.turn_id, reply=event.reply, status=event.status
+                        )
+                        yield ServerSentEvent(event="done", data=done)
     except Exception:
         logger.exception("chat stream failed | turn=%s", turn.id)
-        error = {"code": "INTERNAL_ERROR", "message": FALLBACK_TEXT}
+        error = ErrorDetail(code="INTERNAL_ERROR", message=FALLBACK_TEXT)
         yield ServerSentEvent(event="error", data=error)

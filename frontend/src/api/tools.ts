@@ -1,12 +1,7 @@
 import { getJson } from './client.ts'
+import type { ToolSchema } from './schema.d.ts'
 
-export interface ToolSchema {
-  name: string
-  description: string
-  /** The JSON schema of the tool's arguments. */
-  parameters: Record<string, unknown>
-  strict: boolean
-}
+export type { ToolSchema }
 
 /** Zoomer's tools, exactly as the model receives them. */
 export function fetchToolSchemas(): Promise<ToolSchema[]> {

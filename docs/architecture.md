@@ -1,27 +1,30 @@
 # Architecture: a chat turn
 
-How Zoomer answers one message: the turn lifecycle, streaming, stopping a reply, the tools, the error envelope, the step cap, citations and conversation history. Retrieval itself (chunking, embeddings, the HNSW index) is in [retrieval.md](retrieval.md).
+How Zoomer answers one message: the turn lifecycle, streaming, stopping a reply, the tools, notes and the bound user id, the error envelope, the step cap, citations and conversation history. Retrieval itself (chunking, embeddings, the HNSW index) is in [retrieval.md](retrieval.md).
 
 ## The turn
 
 ```
-POST /api/chat/stream {conversation_id, message}            (POST /api/chat: same turn, one JSON reply)
- 1. session cookie → user (401) → rate limit (429) → conversation owner check (404)
- 2. start the turn: one running turn per conversation (409)        ── Postgres turns
+POST /api/chat/stream {conversation_id?, message}           (POST /api/chat: same turn, one JSON reply)
+ 1. session cookie → user (401) → rate limit (429)
+ 2. conversation owner check (404), or a new conversation when there is no id ── Postgres conversations
  3. records the tools returned in earlier turns of this conversation ── Postgres tool_steps
- 4. TurnRunner.stream → Runner.run_streamed(agent, message, session, max_turns=5)
+ 4. start the turn: one running turn per conversation (409)        ── Postgres turns
+ 5. TurnRunner.stream → Runner.run_streamed(agent + build_tools(user_id), message, session, max_turns=5)
+      SSE: start {conversation_id, turn_id}
       history ── SQLAlchemySession (agent_sessions, agent_messages), last 12 user turns
       ├─ model → search_kb   → embed the query → Qdrant (type / price filters) → envelope
       ├─ model → open_record → kb_records                                     → envelope
+      ├─ model → save_note   → notes, for the user bound in the closure        → envelope
       └─ model → final text with [KB-042] citations
       SSE while it runs: tool_call, tool_result, token …
- 5. check the citations against the retrieved records
- 6. message log, then finish the turn: status, citations, tool steps  ── Postgres messages, turns, tool_steps
- 7. SSE: citation, done {turn_id, status, reply}
+ 6. check the citations against the retrieved records
+ 7. message log, then finish the turn: status, citations, tool steps  ── Postgres messages, turns, tool_steps
+ 8. SSE: citation, done {turn_id, status, reply}
     the client went away → cancel the run, store the turn as cancelled with the reply so far
 ```
 
-The route (`app/api/chat.py`) checks the request and starts the turn in the `start_turn` dependency, so a 404 or 409 is a plain JSON error before any event is sent. `TurnRunner.stream()` (`app/agent/runtime.py`) owns the rest of the turn: it runs the agent, yields the turn's events, checks the citations, writes the message log and finishes the turn through `TurnStore` (`app/services/turns.py`). Its last event is the `TurnResult`: the turn id, the reply, the status, the citations and the steps. A turn ends as `ok`, `max_steps` (the step cap was hit), `cancelled` (the customer stopped it) or `failed` (an error or an empty answer, replaced by a fallback text). `POST /api/chat` reads the same stream to the end and returns the `TurnResult`; it always answers 200 with some reply.
+The route (`app/api/chat.py`) checks the request and starts the turn in the `start_turn` dependency, so a 404 or 409 is a plain JSON error before any event is sent. A message without a `conversation_id` gets a new conversation there, titled after the message. That happens only after the sign-in and rate limit checks, so a refused message leaves no empty chat behind. `TurnRunner.stream()` (`app/agent/runtime.py`) owns the rest of the turn: it runs the agent, yields the turn's events, checks the citations, writes the message log and finishes the turn through `TurnStore` (`app/services/turns.py`). Its first event is a `TurnStart` with the conversation and turn ids, and its last is the `TurnResult`: the conversation and turn ids, the reply, the status, the citations and the steps. The `TurnStart` comes from inside the runner, so a client that leaves right after it still gets its turn stored as `cancelled`. A turn ends as `ok`, `max_steps` (the step cap was hit), `cancelled` (the customer stopped it) or `failed` (an error or an empty answer, replaced by a fallback text). `POST /api/chat` reads the same stream to the end and returns the `TurnResult`; it always answers 200 with some reply.
 
 ## Streaming
 
@@ -29,6 +32,7 @@ The route (`app/api/chat.py`) checks the request and starts the turn in the `sta
 
 | Event | Data | When |
 |---|---|---|
+| `start` | `{"conversation_id", "turn_id"}` | the turn started; the web chat learns a new conversation's id from it |
 | `token` | `{"text": "…"}` | a piece of the reply, as the model writes it |
 | `tool_call` | `{"tool": "search_kb", "args": {…}}` | the model called a tool |
 | `tool_result` | the step: `{"step", "tool", "args", "success", "code", "record_ids", "duration_ms"}` | the tool finished |
@@ -36,11 +40,14 @@ The route (`app/api/chat.py`) checks the request and starts the turn in the `sta
 | `done` | `{"turn_id", "reply", "status"}` | the turn is stored; the last event |
 | `error` | `{"code": "INTERNAL_ERROR", "message": "…"}` | the turn broke before it could be stored |
 
-`done` carries the stored reply, and the web chat swaps the streamed text for it. The two are the same for a normal answer. The fallback and step-limit texts are never streamed as tokens, so they arrive only in `done`. A tool's result is the step its `tool_guard` recorded, so the live step log and the stored one match. While the stream is quiet, for example during a tool call, FastAPI sends a `: ping` comment every 15 seconds so proxies keep the connection open. The responses carry `Cache-Control: no-cache` and `X-Accel-Buffering: no`.
+The data of every event is a pydantic model, and the route's return type lists them, so the OpenAPI schema describes each payload and the web chat's types are generated from it. `done` carries the stored reply, and the web chat swaps the streamed text for it. The two are the same for a normal answer. The fallback and step-limit texts are never streamed as tokens, so they arrive only in `done`. A tool's result is the step its `tool_guard` recorded, so the live step log and the stored one match. While the stream is quiet, for example during a tool call, FastAPI sends a `: ping` comment every 15 seconds so proxies keep the connection open. The responses carry `Cache-Control: no-cache` and `X-Accel-Buffering: no`.
 
 ```bash
 curl -N -b jar -X POST localhost:8000/api/chat/stream \
   -H 'content-type: application/json' -d '{"conversation_id": "<id>", "message": "vanilla under 3000?"}'
+# event: start
+# data: {"conversation_id":"<id>","turn_id":"..."}
+#
 # event: tool_call
 # data: {"tool":"search_kb","args":{"query":"vanilla perfumes under 3000 UAH","k":5,...}}
 #
@@ -75,7 +82,21 @@ Both tools take the run context as their first argument and reach the knowledge 
 
 ## Strict schemas
 
-The SDK builds each tool's JSON schema from its signature and docstring, in strict mode: every property is required (optional ones are nullable) and `additionalProperties` is `false`, so the model's arguments always match the schema, down to the 1–8 range of `k`. `GET /api/tools/schema` returns the schemas straight from the tool objects, and the **Tools** button in the web chat shows them.
+The SDK builds each tool's JSON schema from its signature and docstring, in strict mode: every property is required (optional ones are nullable) and `additionalProperties` is `false`, so the model's arguments always match the schema, down to the 1–8 range of `k`. `GET /api/tools/schema` returns the schemas straight from the tools built for the signed-in customer, and the **Tools** button in the web chat shows them.
+
+## Notes and the bound user id
+
+`save_note(text)` saves a short note, such as a wishlist item, for the customer. It is the only tool that writes, and the notes panel in the web chat lists the notes through `GET /api/notes`.
+
+The customer is never an argument. For each turn, `TurnRunner.stream()` runs a copy of the agent with `build_tools(user_id)` (`app/agent/tools/__init__.py`). `make_save_note(user_id)` (`app/agent/tools/save_note.py`) defines `save_note` inside a function, so the tool closes over the id of the customer the session cookie names. `TurnContext` holds no user id, so the closure is the only way the tool knows whose note it writes. The conversation and the turn the note came from do come from the context.
+
+What a model, or anyone else, can do about it:
+
+- The schema has one property, `text`, and `additionalProperties: false`. In strict mode the API makes the model's arguments match the schema, so it can't produce a `user_id`.
+- A tool call that carries an extra `user_id` anyway reaches the SDK, which validates the arguments against the function's signature and drops the unknown key. The note still goes to the bound customer; `test_save_note_writes_for_the_user_it_was_built_for` calls the tool exactly that way.
+- The schemas don't depend on the customer, so every customer's requests carry identical tool definitions.
+
+`save_note` strips the text and refuses an empty note or one over 500 characters with `INVALID_ARGUMENT`. Otherwise it writes the note through `NoteStore` (`app/services/notes.py`) and returns `{note_id, status: "confirmed"}`. `NoteStore` is built once in the lifespan, and each call opens its own database session, because the tool calls of one model response may run in parallel. Saving only when the customer asks is a rule in the prompt, not a check in code.
 
 ## The error envelope
 
@@ -88,11 +109,11 @@ Tools never raise. `tool_guard` (`app/agent/tools/envelope.py`) wraps each one a
 
 | Code | When |
 |---|---|
-| `INVALID_ARGUMENT` | an empty query, or a record id that doesn't look like `KB-042` |
+| `INVALID_ARGUMENT` | an empty query, a record id that doesn't look like `KB-042`, or a note that is empty or longer than 500 characters |
 | `NOT_FOUND` | no record with that id |
 | `UPSTREAM_ERROR` | anything else that failed: OpenAI, Qdrant or Postgres |
 
-A tool returns a `ToolResult` (the data and the record ids it came from) or raises `ToolError(code, message)` for an expected failure. Any other exception becomes `UPSTREAM_ERROR` with a fixed message, "The knowledge base is unavailable right now." The exception itself goes only to the log, because the model may repeat a tool's message to the customer. The guard also records every call as a step on the context: tool, arguments, success, code, record ids and duration. The prompt tells Zoomer to say it can't check something when a lookup fails.
+A tool returns a `ToolResult` (the data and the record ids it came from) or raises `ToolError(code, message)` for an expected failure. Any other exception becomes `UPSTREAM_ERROR` with a fixed message, "The shop's systems are unavailable right now." The exception itself goes only to the log, because the model may repeat a tool's message to the customer. The guard also records every call as a step on the context: tool, arguments, success, code, record ids and duration. The prompt tells Zoomer to fix its arguments and try once more when the message says how, and otherwise to tell the customer it can't check or save that right now.
 
 ## The step cap
 
@@ -118,5 +139,6 @@ The web chat renders each citation as a chip that opens the full record. Invalid
 | `turns` | `TurnStore` | one row per message: status, citations, start and end time; at most one `running` row per conversation |
 | `tool_steps` | `TurnStore` | one row per tool call: step number, tool, arguments, success, code, record ids, duration |
 | `messages` | the message log | the transcript the web chat shows; each row points to its turn |
+| `notes` | `save_note`, through `NoteStore` | the customer's notes: text, status, the conversation and turn they came from |
 
 The transcript endpoint (`GET /api/conversations/{id}/messages`) returns each of Zoomer's replies with its turn status, citations and steps, so a reloaded chat shows the same chips, step logs and "Stopped" notes. History lives in Postgres, so it survives a restarted or rebuilt `api` container, and any API replica can serve any conversation.

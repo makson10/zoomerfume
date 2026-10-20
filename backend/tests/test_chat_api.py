@@ -51,6 +51,7 @@ def test_chat_runs_a_turn_and_returns_its_result(
         {"KB-012"},
     )
     assert response.json() == {
+        "conversation_id": str(conversation.id),
         "turn_id": str(turn.id),
         "reply": "fake reply",
         "status": "ok",
@@ -58,7 +59,6 @@ def test_chat_runs_a_turn_and_returns_its_result(
         "steps": [make_step(["KB-031"]).model_dump()],
     }
     assert fake_turns.turns[turn.id].status == "ok"
-    assert conversation.title == "hi"
 
 
 def _events(stream: str) -> list[tuple[str, Any]]:
@@ -90,6 +90,7 @@ def test_chat_stream_sends_the_turn_as_events(
     assert response.headers["cache-control"] == "no-cache"
     turn_id = str(fake_runner.calls[0].id)
     assert _events(response.text) == [
+        ("start", {"conversation_id": str(conversation.id), "turn_id": turn_id}),
         ("tool_call", {"tool": "search_kb", "args": {"query": "vanilla"}}),
         ("tool_result", step.model_dump()),
         ("token", {"text": "fake reply"}),
@@ -128,9 +129,9 @@ def test_chat_stream_ends_with_an_error_event_when_the_turn_breaks(
     [
         {"conversation_id": str(uuid.uuid4()), "message": "   "},
         {"conversation_id": str(uuid.uuid4()), "message": "x" * 4001},
-        {"message": "hi"},
+        {"conversation_id": "KB-012", "message": "hi"},
     ],
-    ids=["blank-message", "message-too-long", "missing-conversation-id"],
+    ids=["blank-message", "message-too-long", "bad-conversation-id"],
 )
 def test_chat_rejects_invalid_body(
     client: TestClient, user: User, fake_runner: FakeTurnRunner, body: dict[str, str]
@@ -189,6 +190,29 @@ def test_chat_over_the_rate_limit_gets_429(
     assert fake_runner.calls == []
 
 
+def test_a_first_message_starts_a_conversation_unless_it_is_refused(
+    client: TestClient,
+    user: User,
+    fake_conversations: FakeConversationStore,
+    fake_limiter: FakeRateLimiter,
+    fake_runner: FakeTurnRunner,
+) -> None:
+    fake_limiter.retry_after = 42
+    refused = client.post("/api/chat/stream", json={"message": "vanilla for winter?"})
+    fake_limiter.retry_after = None
+    response = client.post("/api/chat/stream", json={"message": "vanilla for winter?"})
+
+    assert refused.status_code == 429
+    [conversation] = fake_conversations.conversations
+    assert (conversation.user_id, conversation.title) == (user.id, "vanilla for winter?")
+    [turn] = fake_runner.calls
+    assert (turn.conversation_id, turn.retrieved_before) == (conversation.id, set())
+    assert _events(response.text)[0] == (
+        "start",
+        {"conversation_id": str(conversation.id), "turn_id": str(turn.id)},
+    )
+
+
 @pytest.mark.parametrize("path", ["/api/chat", "/api/chat/stream"])
 def test_chat_refuses_a_message_while_a_reply_is_running(
     client: TestClient,
@@ -206,4 +230,3 @@ def test_chat_refuses_a_message_while_a_reply_is_running(
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "REPLY_IN_PROGRESS"
     assert fake_runner.calls == []
-    assert conversation.title is None

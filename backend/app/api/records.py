@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.api.deps import Knowledge, get_current_user
 from app.api.errors import ApiError
+from app.kb.corpus import RecordType
 
 router = APIRouter(
     prefix="/api/records", tags=["records"], dependencies=[Depends(get_current_user)]
@@ -23,7 +24,7 @@ class RecordOut(BaseModel):
 
     id: str
     title: str
-    type: str
+    type: RecordType
     updated: date
     header: dict[str, Any]
     body: str

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 from app.agent.citations import Citations
 from app.agent.context import Step, TurnStatus
-from app.agent.runtime import NewTurn, TurnResult
+from app.agent.runtime import NewTurn, TurnResult, TurnStart
 from app.agent.streaming import Token, ToolCall, TurnEvent
-from app.db.models import Conversation, KbRecord, Message, ToolStep, Turn, User
+from app.db.models import Conversation, KbRecord, Message, Note, ToolStep, Turn, User
 from app.kb.search import Hit
 from app.services.conversations import conversation_title
 
@@ -28,14 +29,16 @@ class FakeTurnRunner:
 
     async def stream(
         self, turn: NewTurn, turns: FakeTurnStore
-    ) -> AsyncIterator[TurnEvent | TurnResult]:
+    ) -> AsyncIterator[TurnStart | TurnEvent | TurnResult]:
         self.calls.append(turn)
+        yield TurnStart(conversation_id=turn.conversation_id, turn_id=turn.id)
         for step in self.steps:
             yield ToolCall(tool=step.tool, args=step.args)
             yield step
         yield Token(text=self.reply)
         await turns.finish(turn.id, self.status, self.citations, self.steps)
         yield TurnResult(
+            conversation_id=turn.conversation_id,
             turn_id=turn.id,
             reply=self.reply,
             status=self.status,
@@ -75,13 +78,13 @@ class FakeConversationStore:
     async def list_for_user(self, user_id: uuid.UUID) -> list[Conversation]:
         return [c for c in self.conversations if c.user_id == user_id]
 
-    def add(self, user_id: uuid.UUID) -> Conversation:
-        conversation = Conversation(id=uuid.uuid4(), user_id=user_id, title=None)
+    def add(self, user_id: uuid.UUID, title: str = "hi") -> Conversation:
+        conversation = Conversation(id=uuid.uuid4(), user_id=user_id, title=title)
         self.conversations.insert(0, conversation)
         return conversation
 
-    async def create(self, user_id: uuid.UUID) -> Conversation:
-        return self.add(user_id)
+    async def create(self, user_id: uuid.UUID, first_message: str) -> Conversation:
+        return self.add(user_id, conversation_title(first_message))
 
     async def get_for_user(
         self, conversation_id: uuid.UUID, user_id: uuid.UUID
@@ -94,9 +97,7 @@ class FakeConversationStore:
     async def messages(self, conversation_id: uuid.UUID) -> list[Message]:
         return self.transcripts.get(conversation_id, [])
 
-    async def mark_active(self, conversation: Conversation, message: str) -> None:
-        if conversation.title is None:
-            conversation.title = conversation_title(message)
+    async def mark_active(self, conversation: Conversation) -> None:
         self.conversations.remove(conversation)
         self.conversations.insert(0, conversation)
 
@@ -148,6 +149,31 @@ class FakeKnowledgeBase:
 
     async def get_record(self, record_id: str) -> KbRecord | None:
         return self.records.get(record_id)
+
+
+class FakeNoteStore:
+    """Stands in for ``NoteStore`` with notes kept in memory, the newest last."""
+
+    def __init__(self) -> None:
+        self.notes: list[Note] = []
+
+    async def add(
+        self, user_id: uuid.UUID, conversation_id: uuid.UUID, turn_id: uuid.UUID, text: str
+    ) -> Note:
+        note = Note(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            text=text,
+            status="confirmed",
+            created_at=datetime.now(UTC),
+        )
+        self.notes.append(note)
+        return note
+
+    async def list_for_user(self, user_id: uuid.UUID, limit: int) -> list[Note]:
+        return [note for note in reversed(self.notes) if note.user_id == user_id][:limit]
 
 
 def make_step(record_ids: list[str]) -> Step:

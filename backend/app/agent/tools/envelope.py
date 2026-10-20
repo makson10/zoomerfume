@@ -23,7 +23,7 @@ from app.agent.context import Step, TurnContext
 logger = logging.getLogger(__name__)
 
 # The model may repeat a tool's message to the customer, so raw exception text stays in the log.
-UPSTREAM_MESSAGE = "The knowledge base is unavailable right now."
+UPSTREAM_MESSAGE = "The shop's systems are unavailable right now."
 
 
 class ErrorCode(StrEnum):

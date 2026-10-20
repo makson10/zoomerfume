@@ -23,7 +23,13 @@ export function Header({ burger, actions }: HeaderProps) {
   const nextColorScheme = colorScheme === 'dark' ? 'light' : 'dark'
 
   return (
-    <Group h="100%" px="md" justify="space-between" wrap="nowrap">
+    <Group
+      h="100%"
+      px={{ base: 'sm', sm: 'md' }}
+      gap="xs"
+      justify="space-between"
+      wrap="nowrap"
+    >
       <Group gap="xs" wrap="nowrap">
         {burger}
         <Image src="/logo.svg" alt="" w={28} h={28} />
@@ -34,7 +40,7 @@ export function Header({ burger, actions }: HeaderProps) {
           Zoomer, AI shop assistant
         </Text>
       </Group>
-      <Group gap="xs" wrap="nowrap">
+      <Group gap={6} wrap="nowrap">
         {actions}
         <ActionIcon
           variant="default"

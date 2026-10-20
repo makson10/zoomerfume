@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 # Zoomer cites a record by its id in square brackets, e.g. "[KB-042]".
 CITATION = re.compile(r"\[(KB-\d{3})\]")
@@ -15,6 +15,9 @@ class Citations(BaseModel):
 
     ``Citations()`` is an answer that cites nothing.
     """
+
+    # Every field is in the output, so the schema marks the defaulted ones required too.
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
 
     # Cited records that a tool returned in this conversation, in the order first cited.
     valid: list[str] = []

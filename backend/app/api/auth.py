@@ -48,13 +48,21 @@ class UserOut(BaseModel):
         return cls(id=user.id, name=user.name, phone_masked=masked)
 
 
-class PhoneResponse(BaseModel):
-    """``known`` signs the user in; ``need_name`` asks for a name next."""
+class KnownPhone(BaseModel):
+    """The number belongs to a customer, who is now signed in."""
 
-    status: Literal["known", "need_name"]
+    status: Literal["known"]
+    user: UserOut
     message: str
-    user: UserOut | None = None
-    phone: str | None = None
+
+
+class NewPhone(BaseModel):
+    """A new number: the customer gives a name next, to create the account."""
+
+    status: Literal["need_name"]
+    # The number in E.164, to send back with the name.
+    phone: str
+    message: str
 
 
 class SignInResponse(BaseModel):
@@ -76,7 +84,7 @@ def _valid_phone(raw: str, settings: Settings) -> str:
 @router.post("/auth/phone", dependencies=[Depends(limit_sign_in)])
 async def sign_in_with_phone(
     body: PhoneRequest, request: Request, users: Users, settings: AppSettings
-) -> PhoneResponse:
+) -> KnownPhone | NewPhone:
     """Sign in a known customer by phone number, or ask a new one for their name.
 
     Raises:
@@ -86,11 +94,11 @@ async def sign_in_with_phone(
     user = await users.get_by_phone(phone)
     logger.info("sign-in | known=%s", user is not None)
     if user is None:
-        return PhoneResponse(
+        return NewPhone(
             status="need_name", phone=phone, message="Nice to meet you! What should I call you?"
         )
     sign_in(request, user)
-    return PhoneResponse(
+    return KnownPhone(
         status="known", user=UserOut.of(user), message=f"Welcome back, {user.name}! {GREETING}"
     )
 

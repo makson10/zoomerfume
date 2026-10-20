@@ -7,7 +7,6 @@ import {
 } from '../api/chat.ts'
 import { ApiError } from '../api/client.ts'
 import {
-  createConversation,
   fetchMessages,
   listConversations,
   type Conversation,
@@ -51,9 +50,9 @@ function toChatMessage(message: StoredMessage): ChatMessage {
  * The signed-in user's conversations and the open one.
  *
  * The most recent conversation opens on load. "New chat" only clears the view;
- * the conversation is created when its first message is sent. Replies stream in
+ * the server creates the conversation when its first turn starts. Replies stream in
  * token by token. `stop()` cancels the one in progress, and so does unmounting,
- * for example on log out.
+ * for example on log out. `notesVersion` goes up each time Zoomer saves a note.
  */
 export function useChat() {
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -62,6 +61,7 @@ export function useChat() {
   const [loading, setLoading] = useState(true)
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notesVersion, setNotesVersion] = useState(0)
   const replyRequest = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -131,11 +131,17 @@ export function useChat() {
     setError(null)
     setStreaming(true)
     try {
-      const id = activeId ?? (await createConversation()).id
-      setActiveId(id)
       let done = false
-      for await (const chatEvent of streamMessage(id, text, request.signal)) {
+      for await (const chatEvent of streamMessage(
+        activeId,
+        text,
+        request.signal,
+      )) {
         switch (chatEvent.event) {
+          case 'start':
+            setActiveId(chatEvent.data.conversation_id)
+            listConversations().then(setConversations, () => undefined)
+            break
           case 'token':
             updateReply((reply) => ({
               content: reply.content + chatEvent.data.text,
@@ -150,6 +156,9 @@ export function useChat() {
               steps: [...(reply.steps ?? []), chatEvent.data],
               activeTool: null,
             }))
+            if (chatEvent.data.tool === 'save_note' && chatEvent.data.success) {
+              setNotesVersion((version) => version + 1)
+            }
             break
           case 'citation':
             updateReply(() => ({ citations: chatEvent.data }))
@@ -186,7 +195,6 @@ export function useChat() {
     } finally {
       replyRequest.current = null
       setStreaming(false)
-      listConversations().then(setConversations, () => undefined)
     }
   }
 
@@ -207,6 +215,7 @@ export function useChat() {
     loading,
     streaming,
     error,
+    notesVersion,
     send,
     stop,
     newChat,

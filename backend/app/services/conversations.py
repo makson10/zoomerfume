@@ -36,8 +36,11 @@ class ConversationStore:
         )
         return list(result)
 
-    async def create(self, user_id: uuid.UUID) -> Conversation:
-        conversation = Conversation(id=uuid.uuid4(), user_id=user_id, title=None)
+    async def create(self, user_id: uuid.UUID, first_message: str) -> Conversation:
+        """Create a conversation, titled after its first message."""
+        conversation = Conversation(
+            id=uuid.uuid4(), user_id=user_id, title=conversation_title(first_message)
+        )
         self._session.add(conversation)
         await self._session.commit()
         return conversation
@@ -59,9 +62,7 @@ class ConversationStore:
         )
         return list(result)
 
-    async def mark_active(self, conversation: Conversation, message: str) -> None:
-        """Move the conversation to the top of the list, titled after its first message."""
-        if conversation.title is None:
-            conversation.title = conversation_title(message)
+    async def mark_active(self, conversation: Conversation) -> None:
+        """Move the conversation to the top of the list."""
         conversation.updated_at = datetime.now(UTC)
         await self._session.commit()

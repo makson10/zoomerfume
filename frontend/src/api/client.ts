@@ -1,3 +1,5 @@
+import type { ErrorBody } from './schema.d.ts'
+
 /** An error response from the API. */
 export class ApiError extends Error {
   readonly status: number
@@ -12,12 +14,10 @@ export class ApiError extends Error {
   }
 }
 
-interface ErrorBody {
-  error?: { code: string; message: string }
-}
-
 async function toApiError(response: Response): Promise<ApiError> {
-  const body = (await response.json().catch(() => null)) as ErrorBody | null
+  const body = (await response
+    .json()
+    .catch(() => null)) as Partial<ErrorBody> | null
   if (body?.error) {
     return new ApiError(response.status, body.error.code, body.error.message)
   }
