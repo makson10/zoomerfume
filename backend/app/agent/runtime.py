@@ -12,7 +12,6 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -21,7 +20,6 @@ from agents import (
     Agent,
     ModelSettings,
     RunConfig,
-    RunContextWrapper,
     RunErrorHandlerInput,
     RunErrorHandlerResult,
     Runner,
@@ -34,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.agent.citations import Citations, check_citations
 from app.agent.context import Step, TurnContext, TurnStatus
+from app.agent.input_filter import cacheable_input
 from app.agent.prompts import AGENT_INSTRUCTIONS
 from app.agent.streaming import Token, TurnEvent, agent_events
 from app.agent.tools import build_tools
@@ -53,20 +52,6 @@ MAX_STEPS_TEXT = (
     "Sorry, I couldn't finish that in {steps} steps. "
     "Could you ask again in a simpler way, or one question at a time?"
 )
-
-
-def _agent_instructions(wrapper: RunContextWrapper[TurnContext], agent: Agent) -> str:
-    """Per-run system instructions: static base + the date and time + the customer's name.
-
-    Instructions are recomputed each run and never persisted to the session, so
-    the date is always fresh. Appended at the end so the static prefix stays
-    cacheable.
-    """
-    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
-    return (
-        f"{AGENT_INSTRUCTIONS}\nCurrent date and time: {now} UTC.\n"
-        f"The customer's name is {wrapper.context.user_name}."
-    )
 
 
 def _is_input_message(item: TResponseInputItem) -> bool:
@@ -180,7 +165,7 @@ class TurnRunner:
         # Each turn runs a copy with the customer's own tools.
         self.agent = Agent(
             name="Zoomer",
-            instructions=_agent_instructions,
+            instructions=AGENT_INSTRUCTIONS,
             model=settings.chat_model,
             # The chat model doesn't accept `temperature`; low reasoning effort
             # keeps replies quick and consistent.
@@ -300,11 +285,16 @@ class TurnRunner:
         return SQLAlchemySession(str(conversation_id), engine=self._engine, ensure_ascii=False)
 
     def _run_config(self, conversation_id: uuid.UUID) -> RunConfig:
-        """Build the run config: history windowing and a ``conversation:<id>`` prompt cache key.
+        """Build the run config: history windowing, the cache-friendly input order and a
+        ``conversation:<id>`` prompt cache key.
 
-        The cache key keeps a conversation's turns on one backend, so its prefix stays cached.
+        The cache key gives each conversation its own prompt cache.
         """
         cache_key = f"conversation:{conversation_id}"
         model_settings = ModelSettings(extra_args={"prompt_cache_key": cache_key})
         window = partial(window_history, turns=self._settings.history_window_turns)
-        return RunConfig(session_input_callback=window, model_settings=model_settings)
+        return RunConfig(
+            session_input_callback=window,
+            call_model_input_filter=cacheable_input,
+            model_settings=model_settings,
+        )

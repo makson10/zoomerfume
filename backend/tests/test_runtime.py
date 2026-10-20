@@ -10,6 +10,7 @@ from agents.testing import ScriptedModel, assistant_message, function_call
 
 from app.agent import runtime
 from app.agent.citations import Citations
+from app.agent.prompts import AGENT_INSTRUCTIONS
 from app.agent.runtime import (
     FALLBACK_TEXT,
     MAX_STEPS_TEXT,
@@ -206,3 +207,40 @@ async def test_a_stopped_turn_keeps_the_reply_so_far(
         ("user", "something vanilla?"),
         ("assistant", preamble),
     ]
+
+
+async def test_each_model_call_sends_the_static_prompt_first_and_the_context_note_last(
+    runner: TurnRunner,
+    fake_kb: FakeKnowledgeBase,
+    fake_turns: FakeTurnStore,
+    history: dict[str, SQLiteSession],
+) -> None:
+    fake_kb.hits = [make_hit("KB-031")]
+    model = ScriptedModel([[_search_call("c1")], [assistant_message("Try KB-031 [KB-031].")]])
+    runner.agent.model = model
+    turn = await _start(fake_turns, "something vanilla?")
+
+    await _run(runner, fake_turns, turn)
+
+    static_prompt = {
+        "role": "developer",
+        "content": [
+            {
+                "type": "input_text",
+                "text": AGENT_INSTRUCTIONS,
+                "prompt_cache_breakpoint": {"mode": "explicit"},
+            }
+        ],
+    }
+    first, second = model.calls
+    assert first.system_instructions is second.system_instructions is None
+    assert first.input[0] == second.input[0] == static_prompt
+    assert first.input[1] == _user("something vanilla?")
+    assert second.input[-3]["type"] == "function_call"
+    assert second.input[-2]["type"] == "function_call_output"
+    note = first.input[-1]
+    assert second.input[-1] == note
+    assert note["role"] == "developer"
+    assert note["content"].endswith("The customer's name is Mary.")
+    items = await history[str(turn.conversation_id)].get_items()
+    assert all(item.get("role") != "developer" for item in items)

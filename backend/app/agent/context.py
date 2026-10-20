@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -41,7 +42,7 @@ class TurnContext:
     """
 
     conversation_id: uuid.UUID
-    # The signed-in customer's name, shown to the model in the instructions.
+    # The signed-in customer's name, shown to the model in the context note.
     user_name: str
     # The turn's row in ``turns``, shared by its message-log rows and tool steps.
     turn_id: uuid.UUID
@@ -49,6 +50,8 @@ class TurnContext:
     user_message: str
     kb: KnowledgeBase
     notes: NoteStore
+    # The time in the context note, the same for every model call of the turn.
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     # The tool calls of this turn, in the order they finished.
     steps: list[Step] = field(default_factory=list)
     status: TurnStatus = "ok"
