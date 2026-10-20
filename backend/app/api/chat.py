@@ -76,7 +76,7 @@ async def start_turn(
             "Wait for my reply or stop it, then send this one again.",
         )
     await conversations.mark_active(conversation)
-    return NewTurn(turn_id, conversation.id, user.name, body.message, retrieved_before)
+    return NewTurn(turn_id, conversation.id, user.id, user.name, body.message, retrieved_before)
 
 
 StartedTurn = Annotated[NewTurn, Depends(start_turn)]

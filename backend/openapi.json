@@ -452,7 +452,7 @@
           "tools"
         ],
         "summary": "Tool Schemas",
-        "description": "Return every tool the agent can call, read straight from the tool objects.",
+        "description": "Return every tool the agent can call, read straight from the tools built for the user.",
         "operationId": "tool_schemas_api_tools_schema_get",
         "responses": {
           "200": {

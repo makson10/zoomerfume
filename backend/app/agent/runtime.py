@@ -36,11 +36,12 @@ from app.agent.citations import Citations, check_citations
 from app.agent.context import Step, TurnContext, TurnStatus
 from app.agent.prompts import AGENT_INSTRUCTIONS
 from app.agent.streaming import Token, TurnEvent, agent_events
-from app.agent.tools import TOOLS
+from app.agent.tools import build_tools
 from app.core.config import Settings
 from app.db.guard import WRITE_TIMEOUT_S
 from app.db.message_log import record_turn_messages
 from app.kb.knowledge_base import KnowledgeBase
+from app.services.notes import NoteStore
 
 if TYPE_CHECKING:
     from app.services.turns import TurnStore
@@ -134,6 +135,8 @@ class NewTurn:
 
     id: uuid.UUID
     conversation_id: uuid.UUID
+    # The signed-in customer, from the session cookie.
+    user_id: uuid.UUID
     user_name: str
     message: str
     # The records the tools returned in the conversation's earlier turns.
@@ -166,16 +169,19 @@ class TurnRunner:
     ``get_turn_runner`` dependency.
     """
 
-    def __init__(self, settings: Settings, engine: AsyncEngine, kb: KnowledgeBase) -> None:
+    def __init__(
+        self, settings: Settings, engine: AsyncEngine, kb: KnowledgeBase, notes: NoteStore
+    ) -> None:
         self._settings = settings
         self._engine = engine
         self._sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
         self._kb = kb
+        self._notes = notes
+        # Each turn runs a copy with the customer's own tools.
         self.agent = Agent(
             name="Zoomer",
             instructions=_agent_instructions,
             model=settings.chat_model,
-            tools=TOOLS,
             # The chat model doesn't accept `temperature`; low reasoning effort
             # keeps replies quick and consistent.
             model_settings=ModelSettings(reasoning=Reasoning(effort="low")),
@@ -210,10 +216,12 @@ class TurnRunner:
             turn_id=turn.id,
             user_message=turn.message.strip(),
             kb=self._kb,
+            notes=self._notes,
         )
+        agent = self.agent.clone(tools=build_tools(turn.user_id))
         session = self._session(turn.conversation_id)
         result = Runner.run_streamed(
-            self.agent,
+            agent,
             ctx.user_message,
             session=session,
             context=ctx,

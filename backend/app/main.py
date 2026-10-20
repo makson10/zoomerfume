@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.sessionmaker = sessionmaker
     app.state.kb = kb
     app.state.notes = notes
-    app.state.turn_runner = TurnRunner(settings, engine, kb)
+    app.state.turn_runner = TurnRunner(settings, engine, kb, notes)
 
     # 1. Verify Postgres connectivity. Users and conversations live there, so
     #    the API can't serve signed-in requests until it is reachable.

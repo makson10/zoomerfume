@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from app.kb.knowledge_base import KnowledgeBase
+    from app.services.notes import NoteStore
 
 # How a turn ended: an answer, the polite answer at the step limit, stopped by the
 # customer, or the fallback text.
@@ -34,7 +35,9 @@ class Step(BaseModel):
 class TurnContext:
     """Mutable context passed into ``Runner.run(..., context=ctx)``.
 
-    The tools read the knowledge base through it and record their calls in it.
+    The tools reach the knowledge base and the notes through it and record their calls in
+    it. It holds no user id: ``save_note`` writes for the customer it was built for (see
+    ``build_tools``).
     """
 
     conversation_id: uuid.UUID
@@ -45,6 +48,7 @@ class TurnContext:
     # The exact text the agent saw this turn.
     user_message: str
     kb: KnowledgeBase
+    notes: NoteStore
     # The tool calls of this turn, in the order they finished.
     steps: list[Step] = field(default_factory=list)
     status: TurnStatus = "ok"

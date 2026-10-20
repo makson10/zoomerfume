@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.agent.tools import TOOLS
-from app.api.deps import get_current_user
+from app.agent.tools import build_tools
+from app.api.deps import CurrentUser
 
-router = APIRouter(prefix="/api/tools", tags=["tools"], dependencies=[Depends(get_current_user)])
+router = APIRouter(prefix="/api/tools", tags=["tools"])
 
 
 class ToolSchema(BaseModel):
@@ -24,8 +24,8 @@ class ToolSchema(BaseModel):
 
 
 @router.get("/schema")
-async def tool_schemas() -> list[ToolSchema]:
-    """Return every tool the agent can call, read straight from the tool objects."""
+async def tool_schemas(user: CurrentUser) -> list[ToolSchema]:
+    """Return every tool the agent can call, read straight from the tools built for the user."""
     return [
         ToolSchema(
             name=tool.name,
@@ -33,5 +33,5 @@ async def tool_schemas() -> list[ToolSchema]:
             parameters=tool.params_json_schema,
             strict=tool.strict_json_schema,
         )
-        for tool in TOOLS
+        for tool in build_tools(user.id)
     ]

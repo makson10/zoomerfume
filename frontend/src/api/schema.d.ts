@@ -243,7 +243,7 @@ export interface paths {
     }
     /**
      * Tool Schemas
-     * @description Return every tool the agent can call, read straight from the tool objects.
+     * @description Return every tool the agent can call, read straight from the tools built for the user.
      */
     get: operations['tool_schemas_api_tools_schema_get']
     put?: never

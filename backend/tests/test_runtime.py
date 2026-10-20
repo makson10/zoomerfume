@@ -21,7 +21,7 @@ from app.agent.runtime import (
 from app.agent.streaming import Token, ToolCall
 from app.core.config import Settings
 from app.db.engine import create_db_engine
-from tests.fakes import FakeKnowledgeBase, FakeTurnStore, make_hit
+from tests.fakes import FakeKnowledgeBase, FakeNoteStore, FakeTurnStore, make_hit
 
 
 def _user(text: str) -> dict[str, Any]:
@@ -69,6 +69,7 @@ def history() -> dict[str, SQLiteSession]:
 def runner(
     settings: Settings,
     fake_kb: FakeKnowledgeBase,
+    fake_notes: FakeNoteStore,
     history: dict[str, SQLiteSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> TurnRunner:
@@ -79,7 +80,7 @@ def runner(
         "SQLAlchemySession",
         lambda session_id, **_: history.setdefault(session_id, SQLiteSession(session_id)),
     )
-    return TurnRunner(settings, create_db_engine(settings), fake_kb)
+    return TurnRunner(settings, create_db_engine(settings), fake_kb, fake_notes)
 
 
 SEARCH_ARGS = {"query": "vanilla", "k": 5, "record_type": None, "max_price": None}
@@ -95,7 +96,7 @@ async def _start(
     conversation_id = uuid.uuid4()
     turn_id = await turns.start(conversation_id)
     assert turn_id is not None
-    return NewTurn(turn_id, conversation_id, "Mary", text, retrieved_before or set())
+    return NewTurn(turn_id, conversation_id, uuid.uuid4(), "Mary", text, retrieved_before or set())
 
 
 async def _run(runner: TurnRunner, turns: FakeTurnStore, turn: NewTurn) -> list[Any]:
@@ -143,6 +144,24 @@ async def test_turn_runner_streams_a_tool_call_and_checks_citations(
     stored = fake_turns.turns[turn.id]
     assert (stored.status, stored.citations) == ("ok", result.citations.model_dump())
     model.assert_complete()
+
+
+async def test_turn_runner_saves_notes_for_the_turns_user(
+    runner: TurnRunner, fake_notes: FakeNoteStore, fake_turns: FakeTurnStore
+) -> None:
+    save = function_call("save_note", {"text": "Wishlist: Jazz Club"}, call_id="c1")
+    runner.agent.model = ScriptedModel([[save], [assistant_message("Saved!")]])
+    first = await _start(fake_turns, "add Jazz Club to my wishlist")
+    second = await _start(fake_turns, "add Jazz Club to my wishlist")
+
+    await _run(runner, fake_turns, first)
+    runner.agent.model = ScriptedModel([[save], [assistant_message("Saved!")]])
+    await _run(runner, fake_turns, second)
+
+    assert [(note.user_id, note.turn_id) for note in fake_notes.notes] == [
+        (first.user_id, first.id),
+        (second.user_id, second.id),
+    ]
 
 
 async def test_turn_runner_stops_politely_at_the_step_limit(
