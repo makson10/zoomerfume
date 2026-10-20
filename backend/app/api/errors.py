@@ -4,6 +4,25 @@ from __future__ import annotations
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+
+class ErrorDetail(BaseModel):
+    """What went wrong: a stable code and a short text for the customer."""
+
+    # A stable machine-readable code, e.g. "INVALID_PHONE".
+    code: str
+    message: str
+
+
+class ErrorBody(BaseModel):
+    """The body of every API error response."""
+
+    error: ErrorDetail
+
+
+# Every 4XX response of an API route has this body, validation errors included.
+ERROR_RESPONSES = {"4XX": {"model": ErrorBody}}
 
 
 class ApiError(Exception):
@@ -32,8 +51,5 @@ class ApiError(Exception):
 
 async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
     """Render an :class:`ApiError` as its JSON body."""
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": {"code": exc.code, "message": exc.message}},
-        headers=exc.headers,
-    )
+    body = ErrorBody(error=ErrorDetail(code=exc.code, message=exc.message))
+    return JSONResponse(status_code=exc.status_code, content=body.model_dump(), headers=exc.headers)

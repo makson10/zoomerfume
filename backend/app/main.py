@@ -22,7 +22,7 @@ from app.agent.runtime import TurnRunner
 from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
-from app.api.errors import ApiError, api_error_handler
+from app.api.errors import ERROR_RESPONSES, ApiError, api_error_handler
 from app.api.health import router as health_router
 from app.api.records import router as records_router
 from app.api.spa import mount_web_chat
@@ -129,6 +129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version="0.3.0",
         docs_url="/docs" if settings.debug else None,
         redoc_url="/redoc" if settings.debug else None,
+        responses=ERROR_RESPONSES,
         lifespan=lifespan,
     )
     app.state.settings = settings

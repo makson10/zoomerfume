@@ -12,12 +12,13 @@ from fastapi import APIRouter, Depends, status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agent.context import Step
+from app.agent.citations import Citations
+from app.agent.context import Step, TurnStatus
 from app.agent.runtime import FALLBACK_TEXT, NewTurn, TurnResult
 from app.agent.streaming import Token, ToolCall
 from app.api.conversations import require_conversation
 from app.api.deps import Conversations, CurrentUser, Runtime, Turns, limit_chat
-from app.api.errors import ApiError
+from app.api.errors import ApiError, ErrorDetail
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,19 @@ class ChatRequest(BaseModel):
 
     conversation_id: uuid.UUID
     message: str = Field(min_length=1, max_length=4000)
+
+
+class TurnDone(BaseModel):
+    """The ``done`` event: the stored reply, which replaces the streamed text."""
+
+    turn_id: uuid.UUID
+    reply: str
+    status: TurnStatus
+
+
+# The ``data`` of each stream event, in event order: token, tool_call, tool_result,
+# citation, done, or error.
+ChatEventData = Token | ToolCall | Step | Citations | TurnDone | ErrorDetail
 
 
 async def start_turn(
@@ -60,6 +74,12 @@ async def start_turn(
 
 StartedTurn = Annotated[NewTurn, Depends(start_turn)]
 
+# FastAPI documents a response model in the route's media type, but errors are JSON
+# even on the stream route.
+STREAM_ERROR_RESPONSES = {
+    "4XX": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorBody"}}}}
+}
+
 
 @router.post("/chat", dependencies=[Depends(limit_chat)])
 async def chat(turn: StartedTurn, turns: Turns, runner: Runtime) -> TurnResult:
@@ -75,10 +95,15 @@ async def chat(turn: StartedTurn, turns: Turns, runner: Runtime) -> TurnResult:
     return events[-1]
 
 
-@router.post("/chat/stream", response_class=EventSourceResponse, dependencies=[Depends(limit_chat)])
+@router.post(
+    "/chat/stream",
+    response_class=EventSourceResponse,
+    responses=STREAM_ERROR_RESPONSES,
+    dependencies=[Depends(limit_chat)],
+)
 async def chat_stream(
     turn: StartedTurn, turns: Turns, runner: Runtime
-) -> AsyncIterator[ServerSentEvent]:
+) -> AsyncIterator[ChatEventData]:
     """Stream Zoomer's reply to one message as server-sent events.
 
     ``token`` events carry the reply as the model writes it, and each tool call sends
@@ -86,6 +111,9 @@ async def chat_stream(
     ``citation`` and ``done``. ``done`` carries the stored reply, which replaces the
     streamed text, because the fallback and step-limit texts are never streamed.
     ``error`` ends a stream that broke. Closing the connection stops the turn.
+
+    The return type lists the events' data models for the OpenAPI schema. Each one is
+    sent as a ``ServerSentEvent`` with its event name.
 
     Raises:
         ApiError: Before the stream starts, the same errors as ``/api/chat``.
@@ -102,9 +130,11 @@ async def chat_stream(
                         yield ServerSentEvent(event="tool_result", data=event)
                     case TurnResult():
                         yield ServerSentEvent(event="citation", data=event.citations)
-                        done = event.model_dump_json(include={"turn_id", "status", "reply"})
-                        yield ServerSentEvent(event="done", raw_data=done)
+                        done = TurnDone(
+                            turn_id=event.turn_id, reply=event.reply, status=event.status
+                        )
+                        yield ServerSentEvent(event="done", data=done)
     except Exception:
         logger.exception("chat stream failed | turn=%s", turn.id)
-        error = {"code": "INTERNAL_ERROR", "message": FALLBACK_TEXT}
+        error = ErrorDetail(code="INTERNAL_ERROR", message=FALLBACK_TEXT)
         yield ServerSentEvent(event="error", data=error)
