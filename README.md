@@ -91,7 +91,7 @@ Every answer shows what it cost, e.g. "$0.00047 · 2 calls · 62% cached". Type 
 
 How the prompt gets cached:
 
-- The system prompt (`backend/app/agent/prompts.py`, about 8 KB or 1,900 tokens, plus a 0.7 KB section on untrusted data in hardened mode) is static: the same text for every customer and every call. With the tool schemas it is well over OpenAI's 1,024-token caching minimum.
+- The system prompt (`backend/app/agent/prompts.py`, about 8 KB or 1,900 tokens, plus a 0.6 KB section on untrusted data in hardened mode) is static: the same text for every customer and every call. With the tool schemas it is well over OpenAI's 1,024-token caching minimum.
 - It opens every request as a developer message with an explicit cache breakpoint (`prompt_cache_breakpoint`). The API doesn't allow a breakpoint on the top-level `instructions`, so the run's `call_model_input_filter` moves the instructions into the input.
 - Everything volatile comes last. The current Kyiv time and the customer's name are a developer note at the very end of each call's input, and the note is never stored. Search results are tool outputs in the history. So each request repeats the previous one up to its newest messages, and OpenAI's implicit breakpoint at the end of the newest user message or tool output lets the next call read all of it from the cache.
 - Every request carries `prompt_cache_key = conversation:<id>`, so each conversation has its own cache.
