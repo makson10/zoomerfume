@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import AppSettings, CurrentUser, Users, limit_sign_in
 from app.api.errors import ApiError
 from app.core.config import Settings
+from app.core.security import SecurityPolicy
 from app.core.validators import validate_name, validate_phone
 from app.db.models import User
 from app.services.auth import sign_in, sign_out
@@ -36,16 +37,18 @@ class CreateUserRequest(BaseModel):
 
 
 class UserOut(BaseModel):
-    """The signed-in user as the web chat sees them. The phone is masked."""
+    """The signed-in user as the web chat sees them, with the security mode the server
+    runs in. The phone is masked."""
 
     id: uuid.UUID
     name: str
     phone_masked: str
+    security: SecurityPolicy
 
     @classmethod
-    def of(cls, user: User) -> UserOut:
+    def of(cls, user: User, security: SecurityPolicy) -> UserOut:
         masked = user.phone[:4] + "•" * (len(user.phone) - 6) + user.phone[-2:]
-        return cls(id=user.id, name=user.name, phone_masked=masked)
+        return cls(id=user.id, name=user.name, phone_masked=masked, security=security)
 
 
 class KnownPhone(BaseModel):
@@ -68,6 +71,21 @@ class NewPhone(BaseModel):
 class SignInResponse(BaseModel):
     user: UserOut
     message: str
+
+
+def _security_policy(settings: Settings) -> SecurityPolicy:
+    hardened = settings.security_mode == "hardened"
+    return SecurityPolicy(
+        untrusted_wrap=hardened
+        if settings.harden_untrusted_wrap is None
+        else settings.harden_untrusted_wrap,
+        rw_separation=hardened
+        if settings.harden_rw_separation is None
+        else settings.harden_rw_separation,
+        confirm_notes=hardened
+        if settings.harden_confirm_notes is None
+        else settings.harden_confirm_notes,
+    )
 
 
 def _valid_phone(raw: str, settings: Settings) -> str:
@@ -99,7 +117,9 @@ async def sign_in_with_phone(
         )
     sign_in(request, user)
     return KnownPhone(
-        status="known", user=UserOut.of(user), message=f"Welcome back, {user.name}! {GREETING}"
+        status="known",
+        user=UserOut.of(user, _security_policy(settings)),
+        message=f"Welcome back, {user.name}! {GREETING}",
     )
 
 
@@ -128,7 +148,7 @@ async def create_account(
     user = await users.get_or_create(phone, name)
     sign_in(request, user)
     message = f"Nice to meet you, {user.name}! {GREETING}"
-    return SignInResponse(user=UserOut.of(user), message=message)
+    return SignInResponse(user=UserOut.of(user, _security_policy(settings)), message=message)
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -138,6 +158,6 @@ async def log_out(request: Request) -> None:
 
 
 @router.get("/me")
-async def me(user: CurrentUser) -> UserOut:
-    """Return the signed-in user, or 401 if nobody is signed in."""
-    return UserOut.of(user)
+async def me(user: CurrentUser, settings: AppSettings) -> UserOut:
+    """Return the signed-in user and the security mode, or 401 if nobody is signed in."""
+    return UserOut.of(user, _security_policy(settings))

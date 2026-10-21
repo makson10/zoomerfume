@@ -73,7 +73,8 @@ def test_chat_runs_a_turn_and_returns_its_result(
         "steps": [make_step(["KB-031"]).model_dump()],
         "usage": USAGE,
     }
-    assert fake_turns.turns[turn.id].status == "ok"
+    stored = fake_turns.turns[turn.id]
+    assert (stored.status, stored.security_mode) == ("ok", "hardened")
 
 
 def _events(stream: str) -> list[tuple[str, Any]]:

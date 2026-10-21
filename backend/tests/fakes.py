@@ -239,7 +239,7 @@ class FakeTurnStore:
         turn.steps = [ToolStep(turn_id=turn.id, **step.model_dump()) for step in steps]
         self.calls[turn.id] = calls
 
-    async def start(self, conversation_id: uuid.UUID) -> uuid.UUID | None:
+    async def start(self, conversation_id: uuid.UUID, security_mode: str) -> uuid.UUID | None:
         if any(
             turn.conversation_id == conversation_id and turn.status == "running"
             for turn in self.turns.values()
@@ -249,6 +249,7 @@ class FakeTurnStore:
             id=uuid.uuid4(),
             conversation_id=conversation_id,
             status="running",
+            security_mode=security_mode,
             started_at=datetime.now(UTC),
         )
         self.turns[turn.id] = turn

@@ -164,7 +164,7 @@
           "auth"
         ],
         "summary": "Me",
-        "description": "Return the signed-in user, or 401 if nobody is signed in.",
+        "description": "Return the signed-in user and the security mode, or 401 if nobody is signed in.",
         "operationId": "me_api_me_get",
         "responses": {
           "200": {
@@ -891,6 +891,37 @@
         "title": "RecordOut",
         "description": "A full knowledge base record: its header fields and its Markdown body."
       },
+      "SecurityPolicy": {
+        "properties": {
+          "untrusted_wrap": {
+            "type": "boolean",
+            "title": "Untrusted Wrap"
+          },
+          "rw_separation": {
+            "type": "boolean",
+            "title": "Rw Separation"
+          },
+          "confirm_notes": {
+            "type": "boolean",
+            "title": "Confirm Notes"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "description": "``hardened`` with every defense on, ``vulnerable`` with none, otherwise the\ndefenses that are on, e.g. ``wrap+confirm``.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "untrusted_wrap",
+          "rw_separation",
+          "confirm_notes",
+          "mode"
+        ],
+        "title": "SecurityPolicy",
+        "description": "The prompt-injection defenses Zoomer runs with."
+      },
       "SignInResponse": {
         "properties": {
           "user": {
@@ -1192,16 +1223,20 @@
           "phone_masked": {
             "type": "string",
             "title": "Phone Masked"
+          },
+          "security": {
+            "$ref": "#/components/schemas/SecurityPolicy"
           }
         },
         "type": "object",
         "required": [
           "id",
           "name",
-          "phone_masked"
+          "phone_masked",
+          "security"
         ],
         "title": "UserOut",
-        "description": "The signed-in user as the web chat sees them. The phone is masked."
+        "description": "The signed-in user as the web chat sees them, with the security mode the server\nruns in. The phone is masked."
       }
     }
   }

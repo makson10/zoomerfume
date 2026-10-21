@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
+    from app.core.security import SecurityPolicy
     from app.kb.knowledge_base import KnowledgeBase
     from app.services.notes import NoteStore
     from app.services.usage import CallUsage
@@ -51,6 +52,8 @@ class TurnContext:
     user_message: str
     kb: KnowledgeBase
     notes: NoteStore
+    # The prompt-injection defenses the tools apply.
+    security: SecurityPolicy
     # The time in the context note, the same for every model call of the turn.
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     # The tool calls of this turn, in the order they finished.

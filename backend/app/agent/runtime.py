@@ -38,6 +38,7 @@ from app.agent.prompts import AGENT_INSTRUCTIONS
 from app.agent.streaming import Token, TurnEvent, agent_events
 from app.agent.tools import build_tools
 from app.core.config import Settings
+from app.core.security import SecurityPolicy
 from app.db.guard import WRITE_TIMEOUT_S
 from app.db.message_log import record_turn_messages
 from app.kb.knowledge_base import KnowledgeBase
@@ -165,6 +166,18 @@ class TurnRunner:
         self._sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
         self._kb = kb
         self._notes = notes
+        hardened = settings.security_mode == "hardened"
+        self._security = SecurityPolicy(
+            untrusted_wrap=hardened
+            if settings.harden_untrusted_wrap is None
+            else settings.harden_untrusted_wrap,
+            rw_separation=hardened
+            if settings.harden_rw_separation is None
+            else settings.harden_rw_separation,
+            confirm_notes=hardened
+            if settings.harden_confirm_notes is None
+            else settings.harden_confirm_notes,
+        )
         # Each turn runs a copy with the customer's own tools.
         self.agent = Agent(
             name="Zoomer",
@@ -175,7 +188,9 @@ class TurnRunner:
             model_settings=ModelSettings(reasoning=Reasoning(effort="low")),
         )
         self._hooks = UsageHooks(settings.chat_model)
-        logger.info("Agent created | model=%s", settings.chat_model)
+        logger.info(
+            "Agent created | model=%s security=%s", settings.chat_model, self._security.mode
+        )
 
     async def stream(
         self, turn: NewTurn, turns: TurnStore
@@ -206,6 +221,7 @@ class TurnRunner:
             user_message=turn.message.strip(),
             kb=self._kb,
             notes=self._notes,
+            security=self._security,
         )
         agent = self.agent.clone(tools=build_tools(turn.user_id))
         session = self._session(turn.conversation_id)

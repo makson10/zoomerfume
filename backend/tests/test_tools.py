@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from app.agent.context import TurnContext
 from app.agent.tools import build_tools, open_record, search_kb
 from app.agent.tools.save_note import make_save_note
+from app.core.security import SecurityPolicy
 from app.db.models import KbRecord, User
 from tests.fakes import FakeKnowledgeBase, FakeNoteStore, make_hit
 
@@ -25,6 +26,7 @@ def ctx(fake_kb: FakeKnowledgeBase, fake_notes: FakeNoteStore) -> TurnContext:
         user_message="hi",
         kb=fake_kb,
         notes=fake_notes,
+        security=SecurityPolicy(untrusted_wrap=False, rw_separation=False, confirm_notes=False),
     )
 
 

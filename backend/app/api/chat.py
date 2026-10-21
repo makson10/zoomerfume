@@ -19,6 +19,8 @@ from app.agent.streaming import Token, ToolCall
 from app.api.conversations import require_conversation
 from app.api.deps import AppSettings, Conversations, CurrentUser, Runtime, Turns, limit_chat
 from app.api.errors import ApiError, ErrorDetail
+from app.core.config import Settings
+from app.core.security import SecurityPolicy
 from app.db.models import User
 from app.services.conversations import ConversationStore
 from app.services.cost_report import COST_COMMAND, NOTHING_YET, cost_report
@@ -56,13 +58,18 @@ ChatEventData = TurnStart | Token | ToolCall | Step | Citations | TurnUsage | Tu
 
 
 async def start_turn(
-    body: ChatRequest, user: User, conversations: ConversationStore, turns: TurnStore
+    body: ChatRequest,
+    user: User,
+    conversations: ConversationStore,
+    turns: TurnStore,
+    settings: Settings,
 ) -> NewTurn:
     """Start a turn for the message in one of the user's conversations, or in a new one.
 
     A new conversation is created only here, after the sign-in and rate limit checks, so a
     refused message leaves no empty chat behind. The reads come first and every write
     commits, so no transaction stays open on the request's session while the turn runs.
+    The turn stores the security mode it runs with.
 
     Raises:
         ApiError: 404 when the conversation isn't the user's, 409 while Zoomer is still
@@ -74,7 +81,19 @@ async def start_turn(
     else:
         conversation = await require_conversation(conversations, body.conversation_id, user)
         retrieved_before = await turns.retrieved_ids(conversation.id)
-    turn_id = await turns.start(conversation.id)
+    hardened = settings.security_mode == "hardened"
+    security = SecurityPolicy(
+        untrusted_wrap=hardened
+        if settings.harden_untrusted_wrap is None
+        else settings.harden_untrusted_wrap,
+        rw_separation=hardened
+        if settings.harden_rw_separation is None
+        else settings.harden_rw_separation,
+        confirm_notes=hardened
+        if settings.harden_confirm_notes is None
+        else settings.harden_confirm_notes,
+    )
+    turn_id = await turns.start(conversation.id, security.mode)
     if turn_id is None:
         raise ApiError(
             status.HTTP_409_CONFLICT,
@@ -125,7 +144,7 @@ async def start_reply(
         return await answer_cost_command(
             body, user, conversations, turns, settings.message_log_enabled
         )
-    return await start_turn(body, user, conversations, turns)
+    return await start_turn(body, user, conversations, turns, settings)
 
 
 StartedReply = Annotated[NewTurn | TurnDone, Depends(start_reply)]

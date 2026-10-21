@@ -97,7 +97,7 @@ async def _start(
     turns: FakeTurnStore, text: str, retrieved_before: set[str] | None = None
 ) -> NewTurn:
     conversation_id = uuid.uuid4()
-    turn_id = await turns.start(conversation_id)
+    turn_id = await turns.start(conversation_id, "hardened")
     assert turn_id is not None
     return NewTurn(turn_id, conversation_id, uuid.uuid4(), "Mary", text, retrieved_before or set())
 

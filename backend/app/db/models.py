@@ -104,6 +104,9 @@ class Turn(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     # {"valid": [...], "invalid": [...], "missing": bool}. Empty while the turn runs.
     citations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The prompt-injection defenses the turn ran with: "hardened", "vulnerable" or the
+    # defenses that were on, e.g. "wrap+confirm".
+    security_mode: Mapped[str] = mapped_column(String(32), nullable=False)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

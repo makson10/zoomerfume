@@ -96,7 +96,7 @@ export interface paths {
     }
     /**
      * Me
-     * @description Return the signed-in user, or 401 if nobody is signed in.
+     * @description Return the signed-in user and the security mode, or 401 if nobody is signed in.
      */
     get: operations['me_api_me_get']
     put?: never
@@ -454,6 +454,24 @@ export interface components {
       /** Body */
       body: string
     }
+    /**
+     * SecurityPolicy
+     * @description The prompt-injection defenses Zoomer runs with.
+     */
+    SecurityPolicy: {
+      /** Untrusted Wrap */
+      untrusted_wrap: boolean
+      /** Rw Separation */
+      rw_separation: boolean
+      /** Confirm Notes */
+      confirm_notes: boolean
+      /**
+       * Mode
+       * @description ``hardened`` with every defense on, ``vulnerable`` with none, otherwise the
+       *     defenses that are on, e.g. ``wrap+confirm``.
+       */
+      readonly mode: string
+    }
     /** SignInResponse */
     SignInResponse: {
       user: components['schemas']['UserOut']
@@ -602,7 +620,8 @@ export interface components {
     }
     /**
      * UserOut
-     * @description The signed-in user as the web chat sees them. The phone is masked.
+     * @description The signed-in user as the web chat sees them, with the security mode the server
+     *     runs in. The phone is masked.
      */
     UserOut: {
       /**
@@ -614,6 +633,7 @@ export interface components {
       name: string
       /** Phone Masked */
       phone_masked: string
+      security: components['schemas']['SecurityPolicy']
     }
   }
   responses: never
@@ -634,6 +654,7 @@ export type NewPhone = components['schemas']['NewPhone']
 export type NoteOut = components['schemas']['NoteOut']
 export type PhoneRequest = components['schemas']['PhoneRequest']
 export type RecordOut = components['schemas']['RecordOut']
+export type SecurityPolicy = components['schemas']['SecurityPolicy']
 export type SignInResponse = components['schemas']['SignInResponse']
 export type Step = components['schemas']['Step']
 export type Token = components['schemas']['Token']

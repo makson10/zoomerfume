@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -66,6 +67,14 @@ class Settings(BaseSettings):
     # Fixed one-minute windows: chat messages per user, sign-in attempts per IP.
     rate_limit_chat_per_min: int = 20
     rate_limit_auth_per_min: int = 10
+
+    # ── Prompt-injection defenses ─────────────────────────────────────────
+    # "hardened" turns on all three defenses, "vulnerable" turns them all off.
+    security_mode: Literal["hardened", "vulnerable"] = "hardened"
+    # Turn one defense on or off whatever the mode says. Unset follows the mode.
+    harden_untrusted_wrap: bool | None = None
+    harden_rw_separation: bool | None = None
+    harden_confirm_notes: bool | None = None
 
     debug: bool = False
 

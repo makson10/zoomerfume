@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import Settings
 from tests.fakes import FakeRateLimiter, FakeUserStore
 
 PHONE = "+380671234567"
@@ -74,3 +75,31 @@ def test_sign_in_over_the_rate_limit_gets_429(
     assert response.headers["retry-after"] == "30"
     assert fake_limiter.hits == [("auth:ip:testclient", 10)]
     assert client.get("/api/me").status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("env", "mode"),
+    [
+        ({}, "hardened"),
+        ({"SECURITY_MODE": "vulnerable"}, "vulnerable"),
+        ({"SECURITY_MODE": "vulnerable", "HARDEN_CONFIRM_NOTES": "true"}, "confirm"),
+        ({"HARDEN_UNTRUSTED_WRAP": "false"}, "separation+confirm"),
+    ],
+    ids=["default", "vulnerable", "one-defense-on", "one-defense-off"],
+)
+def test_me_shows_the_security_mode_the_settings_resolve_to(
+    client: TestClient,
+    fake_users: FakeUserStore,
+    monkeypatch: pytest.MonkeyPatch,
+    env: dict[str, str],
+    mode: str,
+) -> None:
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    client.app.state.settings = Settings(
+        _env_file=None, openai_api_key="test-key", session_secret="x" * 32
+    )
+    fake_users.add(PHONE, "Mary")
+    client.post("/api/auth/phone", json={"phone": PHONE})
+
+    assert client.get("/api/me").json()["security"]["mode"] == mode
