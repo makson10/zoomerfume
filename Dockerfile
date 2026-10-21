@@ -41,7 +41,7 @@ COPY backend/alembic.ini ./alembic.ini
 COPY backend/scripts/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# The knowledge base corpus and the retrieval check questions.
+# The knowledge base corpus and the evaluation questions.
 COPY backend/corpus/ ./corpus/
 COPY backend/eval/ ./eval/
 

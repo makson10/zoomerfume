@@ -30,6 +30,10 @@ class ErrorCode(StrEnum):
     INVALID_ARGUMENT = "INVALID_ARGUMENT"
     NOT_FOUND = "NOT_FOUND"
     UPSTREAM_ERROR = "UPSTREAM_ERROR"
+    # A write refused because this turn has read knowledge base text.
+    BLOCKED_UNTRUSTED_CONTEXT = "BLOCKED_UNTRUSTED_CONTEXT"
+    # A note that waits for the customer to confirm it.
+    CONFIRMATION_REQUIRED = "CONFIRMATION_REQUIRED"
 
 
 class ToolError(Exception):

@@ -1,7 +1,10 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.security import SecurityPolicy
 
 
 class Settings(BaseSettings):
@@ -67,7 +70,29 @@ class Settings(BaseSettings):
     rate_limit_chat_per_min: int = 20
     rate_limit_auth_per_min: int = 10
 
+    # ── Prompt-injection defenses ─────────────────────────────────────────
+    # "hardened" turns on all three defenses, "vulnerable" turns them all off.
+    security_mode: Literal["hardened", "vulnerable"] = "hardened"
+    # Turn one defense on or off whatever the mode says. Unset follows the mode.
+    harden_untrusted_wrap: bool | None = None
+    harden_rw_separation: bool | None = None
+    harden_confirm_notes: bool | None = None
+
     debug: bool = False
+
+    @property
+    def security(self) -> SecurityPolicy:
+        """The prompt-injection defenses that are on: each ``HARDEN_*`` setting, or the
+        mode where that setting is unset."""
+        hardened = self.security_mode == "hardened"
+        overrides = {
+            "untrusted_wrap": self.harden_untrusted_wrap,
+            "rw_separation": self.harden_rw_separation,
+            "confirm_notes": self.harden_confirm_notes,
+        }
+        return SecurityPolicy(
+            **{name: hardened if on is None else on for name, on in overrides.items()}
+        )
 
 
 def get_settings() -> Settings:

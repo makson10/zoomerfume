@@ -34,7 +34,7 @@ from app.agent.citations import Citations, check_citations
 from app.agent.context import Step, TurnContext, TurnStatus
 from app.agent.hooks import UsageHooks
 from app.agent.input_filter import cacheable_input
-from app.agent.prompts import AGENT_INSTRUCTIONS
+from app.agent.prompts import instructions
 from app.agent.streaming import Token, TurnEvent, agent_events
 from app.agent.tools import build_tools
 from app.core.config import Settings
@@ -165,17 +165,20 @@ class TurnRunner:
         self._sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
         self._kb = kb
         self._notes = notes
+        self._security = settings.security
         # Each turn runs a copy with the customer's own tools.
         self.agent = Agent(
             name="Zoomer",
-            instructions=AGENT_INSTRUCTIONS,
+            instructions=instructions(self._security),
             model=settings.chat_model,
             # The chat model doesn't accept `temperature`; low reasoning effort
             # keeps replies quick and consistent.
             model_settings=ModelSettings(reasoning=Reasoning(effort="low")),
         )
         self._hooks = UsageHooks(settings.chat_model)
-        logger.info("Agent created | model=%s", settings.chat_model)
+        logger.info(
+            "Agent created | model=%s security=%s", settings.chat_model, self._security.mode
+        )
 
     async def stream(
         self, turn: NewTurn, turns: TurnStore
@@ -206,6 +209,7 @@ class TurnRunner:
             user_message=turn.message.strip(),
             kb=self._kb,
             notes=self._notes,
+            security=self._security,
         )
         agent = self.agent.clone(tools=build_tools(turn.user_id))
         session = self._session(turn.conversation_id)
@@ -222,7 +226,7 @@ class TurnRunner:
         streamed = ""
         try:
             yield TurnStart(conversation_id=turn.conversation_id, turn_id=turn.id)
-            async for event in agent_events(result, ctx.steps):
+            async for event in agent_events(result, ctx):
                 if isinstance(event, Token):
                     streamed += event.text
                 yield event

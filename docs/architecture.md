@@ -1,6 +1,6 @@
 # Architecture: a chat turn
 
-How Zoomer answers one message: the turn lifecycle, streaming, stopping a reply, the tools, notes and the bound user id, the error envelope, the step cap, citations, prompt caching, costs and conversation history. Retrieval itself (chunking, embeddings, the HNSW index) is in [retrieval.md](retrieval.md).
+How Zoomer answers one message: the turn lifecycle, streaming, stopping a reply, the tools, notes and the bound user id, the error envelope, the step cap, citations, prompt caching, costs and conversation history. Retrieval itself (chunking, embeddings, the HNSW index) is in [retrieval.md](retrieval.md), and the prompt-injection defenses are in [security.md](security.md).
 
 ## The turn
 
@@ -10,17 +10,19 @@ POST /api/chat/stream {conversation_id?, message}           (POST /api/chat: sam
     "/cost"? → the cost report from llm_calls, no model, no turn → SSE: done (see /cost below)
  2. conversation owner check (404), or a new conversation when there is no id ── Postgres conversations
  3. records the tools returned in earlier turns of this conversation ── Postgres tool_steps
- 4. start the turn: one running turn per conversation (409)        ── Postgres turns
+ 4. start the turn: one running turn per conversation (409), with its security mode ── Postgres turns
  5. TurnRunner.stream → Runner.run_streamed(agent + build_tools(user_id), message, session, max_turns=5)
       SSE: start {conversation_id, turn_id}
       history ── SQLAlchemySession (agent_sessions, agent_messages), last 12 user turns
       each model call: [static prompt ◆] [history] [new items] [note: Kyiv time, name]  (◆ cache breakpoint)
       ├─ model → search_kb   → embed the query → Qdrant (type / price filters) → envelope
       ├─ model → open_record → kb_records                                     → envelope
+      │     (hardened: record text inside <untrusted_data> tags)
       ├─ model → save_note   → notes, for the user bound in the closure        → envelope
+      │     (hardened: refused after a read in this turn, otherwise a pending note)
       └─ model → final text with [KB-042] citations
       every model call and search embedding → its usage on the turn's context
-      SSE while it runs: tool_call, tool_result, token …
+      SSE while it runs: tool_call, tool_result, pending_note, token …
  6. check the citations against the retrieved records
  7. message log, then finish the turn: status, citations, tool steps, model calls
                                        ── Postgres messages, turns, tool_steps, llm_calls
@@ -40,6 +42,7 @@ The route (`app/api/chat.py`) checks the request and starts the turn in its `sta
 | `token` | `{"text": "…"}` | a piece of the reply, as the model writes it |
 | `tool_call` | `{"tool": "search_kb", "args": {…}}` | the model called a tool |
 | `tool_result` | the step: `{"step", "tool", "args", "success", "code", "record_ids", "duration_ms"}` | the tool finished |
+| `pending_note` | `{"note_id", "text"}` | `save_note` proposed a note that waits for the customer (hardened mode); it follows the note's `tool_result` |
 | `citation` | `{"valid": […], "invalid": […], "missing": false}` | the reply is complete |
 | `usage` | `{"calls", "input_tokens", "cached_tokens", "cache_write_tokens", "output_tokens", "cost_usd"}` | the reply is complete; the web chat shows it under the answer |
 | `done` | `{"turn_id", "reply", "status"}` | the turn is stored; the last event. `turn_id` is null for a `/cost` reply, which sends only `done` |
@@ -83,7 +86,7 @@ Nothing is retrieved automatically. The model decides when to look something up,
 | `search_kb` | `query`, `k` (1–8, default 5), `record_type` (`product`, `policy`, `company`, `faq`, `news` or null), `max_price` (UAH or null) | `hits`: `record_id`, `title`, `type`, `chunk_index`, `section`, `updated`, `score`, `text`, `price` |
 | `open_record` | `record_id`, e.g. `KB-042` | the record's `header` (for products: sizes, prices, availability) and its whole `body` |
 
-Both tools take the run context as their first argument and reach the knowledge base through `TurnContext.kb`, a `KnowledgeBase` (`app/kb/knowledge_base.py`) built once on the app's OpenAI, Qdrant and Postgres clients. The record drawer in the web chat reads the same `kb_records` table through `GET /api/records/{id}`.
+Both tools take the run context as their first argument and reach the knowledge base through `TurnContext.kb`, a `KnowledgeBase` (`app/kb/knowledge_base.py`) built once on the app's OpenAI, Qdrant and Postgres clients. The record drawer in the web chat reads the same `kb_records` table through `GET /api/records/{id}`. With `HARDEN_UNTRUSTED_WRAP` on (the hardened default), a passage's `text` and a record's `body` reach the model inside `<untrusted_data record="KB-…">` tags, through `TurnContext.security` (see [security.md](security.md)).
 
 ## Strict schemas
 
@@ -101,7 +104,9 @@ What a model, or anyone else, can do about it:
 - A tool call that carries an extra `user_id` anyway reaches the SDK, which validates the arguments against the function's signature and drops the unknown key. The note still goes to the bound customer; `test_save_note_writes_for_the_user_it_was_built_for` calls the tool exactly that way.
 - The schemas don't depend on the customer, so every customer's requests carry identical tool definitions.
 
-`save_note` strips the text and refuses an empty note or one over 500 characters with `INVALID_ARGUMENT`. Otherwise it writes the note through `NoteStore` (`app/services/notes.py`) and returns `{note_id, status: "confirmed"}`. `NoteStore` is built once in the lifespan, and each call opens its own database session, because the tool calls of one model response may run in parallel. Saving only when the customer asks is a rule in the prompt, not a check in code.
+`save_note` strips the text and refuses an empty note or one over 500 characters with `INVALID_ARGUMENT`. Otherwise it writes the note through `NoteStore` (`app/services/notes.py`) and returns `{note_id, status: "confirmed"}`. `NoteStore` is built once in the lifespan, and each call opens its own database session, because the tool calls of one model response may run in parallel. Saving only when the customer asks is a rule in the prompt.
+
+The hardened mode adds two checks in code, set by `TurnContext.security` (see [security.md](security.md)). With `HARDEN_RW_SEPARATION`, a turn whose tools have returned knowledge base records can't save a note: `save_note` answers `BLOCKED_UNTRUSTED_CONTEXT`. With `HARDEN_CONFIRM_NOTES`, the note is stored as `pending`, the tool answers `CONFIRMATION_REQUIRED`, and the turn's `pending_notes` go out as `pending_note` events. The web chat shows a card under the reply and in the notes panel, and the customer's Save or Don't save calls `POST /api/notes/{id}/confirm` or `/reject`, which stores the decision and its time (`decided_at`). A note is decided once: a second decision, from another tab for example, gets a 409 `NOTE_DECIDED`. The model has no tool for that. `GET /api/notes` lists pending and confirmed notes, not rejected ones, and the transcript returns each reply's proposed notes with their current status, so the cards survive a reload.
 
 ## The error envelope
 
@@ -117,8 +122,10 @@ Tools never raise. `tool_guard` (`app/agent/tools/envelope.py`) wraps each one a
 | `INVALID_ARGUMENT` | an empty query, a record id that doesn't look like `KB-042`, or a note that is empty or longer than 500 characters |
 | `NOT_FOUND` | no record with that id |
 | `UPSTREAM_ERROR` | anything else that failed: OpenAI, Qdrant or Postgres |
+| `BLOCKED_UNTRUSTED_CONTEXT` | `save_note` in a turn that has read the knowledge base, with the read/write separation on |
+| `CONFIRMATION_REQUIRED` | `save_note` stored the note as `pending`, with the confirmation on; the customer decides |
 
-A tool returns a `ToolResult` (the data and the record ids it came from) or raises `ToolError(code, message)` for an expected failure. Any other exception becomes `UPSTREAM_ERROR` with a fixed message, "The shop's systems are unavailable right now." The exception itself goes only to the log, because the model may repeat a tool's message to the customer. The guard also records every call as a step on the context: tool, arguments, success, code, record ids and duration. The prompt tells Zoomer to fix its arguments and try once more when the message says how, and otherwise to tell the customer it can't check or save that right now.
+A tool returns a `ToolResult` (the data and the record ids it came from) or raises `ToolError(code, message)` for an expected failure. Any other exception becomes `UPSTREAM_ERROR` with a fixed message, "The shop's systems are unavailable right now." The exception itself goes only to the log, because the model may repeat a tool's message to the customer. The guard also records every call as a step on the context: tool, arguments, success, code, record ids and duration. The prompt tells Zoomer to do what the message says when it says what to do next (the two defense codes do), to fix its arguments and try once more when it shows how, and otherwise to tell the customer it can't check or save that right now.
 
 ## The step cap
 
@@ -140,7 +147,7 @@ The web chat renders each citation as a chip that opens the full record. Invalid
 
 OpenAI caches the longest prefix a request shares with an earlier request under the same `prompt_cache_key`, and bills those tokens at a tenth of the input price. Writing a prefix to the cache costs 1.25× the input price. So the request has to start with what never changes and end with what always does. `RunConfig.call_model_input_filter` (`cacheable_input()` in `app/agent/input_filter.py`) orders every model call's input:
 
-1. The static prompt, `AGENT_INSTRUCTIONS` (`app/agent/prompts.py`, about 7.9 KB). It is the same for every customer, so it is a constant, not a function of the run. The API rejects an explicit cache breakpoint on the top-level `instructions`, so the filter sends the instructions as the first input item instead: a developer message whose `input_text` block has `prompt_cache_breakpoint: {"mode": "explicit"}`.
+1. The static prompt, from `instructions()` (`app/agent/prompts.py`): `AGENT_INSTRUCTIONS`, about 8 KB, plus the untrusted data rules (0.6 KB) when the wrapping is on. It is the same for every customer and every call, so the runner builds it once at startup, not per run. The API rejects an explicit cache breakpoint on the top-level `instructions`, so the filter sends the instructions as the first input item instead: a developer message whose `input_text` block has `prompt_cache_breakpoint: {"mode": "explicit"}`.
 2. The history and this turn's items: the customer's message, then the tool calls and outputs of this turn. Retrieved passages are tool outputs, so they come after the static prompt too.
 3. A developer note, always the last item: `Now: Tuesday, 20 October 2026, 15:42 Kyiv time. The customer's name is Mary.` The time is taken once per turn (`TurnContext.started_at`), so every call of a turn sends the same note. The shop's rules use Kyiv time and weekdays (courier cutoffs, support hours), so the note gives both.
 
@@ -165,10 +172,10 @@ A message that is exactly `/cost` (any case) is a command, not a question. The r
 | Table | Written by | Holds |
 |---|---|---|
 | `agent_sessions`, `agent_messages` | the SDK's `SQLAlchemySession` | the conversation history the model sees: messages, tool calls and tool outputs. Created by migration `0004`, not by the SDK |
-| `turns` | `TurnStore` | one row per message: status, citations, start and end time; at most one `running` row per conversation |
+| `turns` | `TurnStore` | one row per message: status, citations, the security mode it ran with, start and end time; at most one `running` row per conversation |
 | `tool_steps` | `TurnStore` | one row per tool call: step number, tool, arguments, success, code, record ids, duration |
 | `messages` | the message log | the transcript the web chat shows; each row points to its turn. `/cost` and its report are rows with `kind = command` and no turn |
 | `llm_calls` | `TurnStore`, ingest | one row per model call: chat or embedding, model, input, cached, cache-write and output tokens, cost in USD; the turn it belongs to |
-| `notes` | `save_note`, through `NoteStore` | the customer's notes: text, status, the conversation and turn they came from |
+| `notes` | `save_note`, through `NoteStore` | the customer's notes: text, status (`confirmed`, or `pending` until the customer decides, then `confirmed` or `rejected` with `decided_at`), the conversation and turn they came from |
 
-The transcript endpoint (`GET /api/conversations/{id}/messages`) returns each of Zoomer's replies with its turn status, citations, steps and usage, so a reloaded chat shows the same chips, step logs, costs and "Stopped" notes. History lives in Postgres, so it survives a restarted or rebuilt `api` container, and any API replica can serve any conversation.
+The transcript endpoint (`GET /api/conversations/{id}/messages`) returns each of Zoomer's replies with its turn status, citations, steps, usage and proposed notes, so a reloaded chat shows the same chips, step logs, costs, note cards and "Stopped" notes. History lives in Postgres, so it survives a restarted or rebuilt `api` container, and any API replica can serve any conversation.

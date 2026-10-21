@@ -13,7 +13,7 @@ from agents import RunResultStreaming
 from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 from pydantic import BaseModel
 
-from app.agent.context import Step
+from app.agent.context import PendingNote, Step, TurnContext
 
 
 class Token(BaseModel):
@@ -29,19 +29,21 @@ class ToolCall(BaseModel):
     args: dict[str, Any]
 
 
-# A tool's result is the step the tool guard recorded for it.
-TurnEvent = Token | ToolCall | Step
+# A tool's result is the step the tool guard recorded for it. A note save_note proposed
+# follows its step.
+TurnEvent = Token | ToolCall | Step | PendingNote
 
 
-async def agent_events(result: RunResultStreaming, steps: list[Step]) -> AsyncIterator[TurnEvent]:
-    """Yield a streamed run's text deltas, tool calls and tool results as turn events.
+async def agent_events(result: RunResultStreaming, turn: TurnContext) -> AsyncIterator[TurnEvent]:
+    """Yield a streamed run's text deltas, tool calls, tool results and proposed notes as
+    turn events.
 
     Args:
         result: The streamed run.
-        steps: The turn's steps, which the tool guard appends to. A step is sent when its
-            tool's output shows up in the stream.
+        turn: The turn's context. The tools append their steps and proposed notes to it,
+            and they are sent when a tool's output shows up in the stream.
     """
-    sent = 0
+    sent_steps = sent_notes = 0
     async for event in result.stream_events():
         if event.type == "raw_response_event" and isinstance(event.data, ResponseTextDeltaEvent):
             yield Token(text=event.data.delta)
@@ -50,6 +52,8 @@ async def agent_events(result: RunResultStreaming, steps: list[Step]) -> AsyncIt
             if isinstance(call, ResponseFunctionToolCall):
                 yield ToolCall(tool=call.name, args=json.loads(call.arguments))
         elif event.type == "run_item_stream_event" and event.name == "tool_output":
-            for step in steps[sent:]:
+            for step in turn.steps[sent_steps:]:
                 yield step
-            sent = len(steps)
+            for note in turn.pending_notes[sent_notes:]:
+                yield note
+            sent_steps, sent_notes = len(turn.steps), len(turn.pending_notes)

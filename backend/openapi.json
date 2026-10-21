@@ -164,7 +164,7 @@
           "auth"
         ],
         "summary": "Me",
-        "description": "Return the signed-in user, or 401 if nobody is signed in.",
+        "description": "Return the signed-in user and the security mode, or 401 if nobody is signed in.",
         "operationId": "me_api_me_get",
         "responses": {
           "200": {
@@ -330,7 +330,7 @@
           "chat"
         ],
         "summary": "Chat Stream",
-        "description": "Stream Zoomer's reply to one message as server-sent events.\n\n``start`` names the conversation and the turn, which is how the web chat learns the id\nof a new conversation. ``token`` events carry the reply as the model writes it, and each\ntool call sends ``tool_call`` and then ``tool_result`` with its step. The stream ends\nwith ``citation``, ``usage`` (the turn's tokens and cost) and ``done``. ``done`` carries\nthe stored reply, which replaces the streamed text, because the fallback and step-limit\ntexts are never streamed. ``error`` ends a stream that broke. Closing the connection\nstops the turn. A chat command such as ``/cost`` runs no turn: its stream is a single\n``done``.\n\nThe return type lists the events' data models for the OpenAPI schema. Each one is\nsent as a ``ServerSentEvent`` with its event name.\n\nRaises:\n    ApiError: Before the stream starts, the same errors as ``/api/chat``.",
+        "description": "Stream Zoomer's reply to one message as server-sent events.\n\n``start`` names the conversation and the turn, which is how the web chat learns the id\nof a new conversation. ``token`` events carry the reply as the model writes it, and each\ntool call sends ``tool_call`` and then ``tool_result`` with its step. A note that waits\nfor the customer's confirmation follows its step as ``pending_note``. The stream ends\nwith ``citation``, ``usage`` (the turn's tokens and cost) and ``done``. ``done`` carries\nthe stored reply, which replaces the streamed text, because the fallback and step-limit\ntexts are never streamed. ``error`` ends a stream that broke. Closing the connection\nstops the turn. A chat command such as ``/cost`` runs no turn: its stream is a single\n``done``.\n\nThe return type lists the events' data models for the OpenAPI schema. Each one is\nsent as a ``ServerSentEvent`` with its event name.\n\nRaises:\n    ApiError: Before the stream starts, the same errors as ``/api/chat``.",
         "operationId": "chat_stream_api_chat_stream_post",
         "requestBody": {
           "content": {
@@ -366,6 +366,9 @@
                           },
                           {
                             "$ref": "#/components/schemas/Step"
+                          },
+                          {
+                            "$ref": "#/components/schemas/PendingNote"
                           },
                           {
                             "$ref": "#/components/schemas/Citations"
@@ -499,7 +502,7 @@
           "notes"
         ],
         "summary": "List Notes",
-        "description": "Return the user's notes, the newest first, at most :data:`NOTES_LIMIT` of them.",
+        "description": "Return the user's notes, the newest first, at most :data:`NOTES_LIMIT` of them.\n\nPending notes are included, rejected ones are not.",
         "operationId": "list_notes_api_notes_get",
         "responses": {
           "200": {
@@ -525,6 +528,94 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/notes/{note_id}/confirm": {
+      "post": {
+        "tags": [
+          "notes"
+        ],
+        "summary": "Confirm Note",
+        "description": "Save a note Zoomer proposed. Only the customer can do this, from the web chat: the\nmodel has no tool for it.\n\nRaises:\n    ApiError: 404 when the user has no such note, 409 when it was already decided.",
+        "operationId": "confirm_note_api_notes__note_id__confirm_post",
+        "parameters": [
+          {
+            "name": "note_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Note Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Client Error"
+          }
+        }
+      }
+    },
+    "/api/notes/{note_id}/reject": {
+      "post": {
+        "tags": [
+          "notes"
+        ],
+        "summary": "Reject Note",
+        "description": "Drop a note Zoomer proposed. It leaves the notes panel.\n\nRaises:\n    ApiError: 404 when the user has no such note, 409 when it was already decided.",
+        "operationId": "reject_note_api_notes__note_id__reject_post",
+        "parameters": [
+          {
+            "name": "note_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Note Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Client Error"
           }
         }
       }
@@ -762,6 +853,14 @@
                 "type": "null"
               }
             ]
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/NoteOut"
+            },
+            "type": "array",
+            "title": "Notes",
+            "default": []
           }
         },
         "type": "object",
@@ -773,10 +872,11 @@
           "status",
           "citations",
           "steps",
-          "usage"
+          "usage",
+          "notes"
         ],
         "title": "MessageOut",
-        "description": "One logged message of a conversation's transcript.\n\nZoomer's replies also carry how their turn ended, their checked citations, the tool\ncalls behind them and what the turn's model calls cost."
+        "description": "One logged message of a conversation's transcript.\n\nZoomer's replies also carry how their turn ended, their checked citations, the tool\ncalls behind them, what the turn's model calls cost and the notes it proposed."
       },
       "NewPhone": {
         "properties": {
@@ -814,6 +914,15 @@
             "type": "string",
             "title": "Text"
           },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "confirmed",
+              "rejected"
+            ],
+            "title": "Status"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -824,10 +933,31 @@
         "required": [
           "id",
           "text",
+          "status",
           "created_at"
         ],
         "title": "NoteOut",
         "description": "One of the customer's notes."
+      },
+      "PendingNote": {
+        "properties": {
+          "note_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Note Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "note_id",
+          "text"
+        ],
+        "title": "PendingNote",
+        "description": "A note ``save_note`` proposed. It waits for the customer to confirm or reject it."
       },
       "PhoneRequest": {
         "properties": {
@@ -890,6 +1020,37 @@
         ],
         "title": "RecordOut",
         "description": "A full knowledge base record: its header fields and its Markdown body."
+      },
+      "SecurityPolicy": {
+        "properties": {
+          "untrusted_wrap": {
+            "type": "boolean",
+            "title": "Untrusted Wrap"
+          },
+          "rw_separation": {
+            "type": "boolean",
+            "title": "Rw Separation"
+          },
+          "confirm_notes": {
+            "type": "boolean",
+            "title": "Confirm Notes"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "description": "``hardened`` with every defense on, ``vulnerable`` with none, otherwise the\ndefenses that are on, e.g. ``wrap+confirm``.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "untrusted_wrap",
+          "rw_separation",
+          "confirm_notes",
+          "mode"
+        ],
+        "title": "SecurityPolicy",
+        "description": "The prompt-injection defenses Zoomer runs with."
       },
       "SignInResponse": {
         "properties": {
@@ -1192,16 +1353,20 @@
           "phone_masked": {
             "type": "string",
             "title": "Phone Masked"
+          },
+          "security": {
+            "$ref": "#/components/schemas/SecurityPolicy"
           }
         },
         "type": "object",
         "required": [
           "id",
           "name",
-          "phone_masked"
+          "phone_masked",
+          "security"
         ],
         "title": "UserOut",
-        "description": "The signed-in user as the web chat sees them. The phone is masked."
+        "description": "The signed-in user as the web chat sees them, with the security mode the server\nruns in. The phone is masked."
       }
     }
   }

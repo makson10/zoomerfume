@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   streamMessage,
   type Citations,
@@ -13,6 +13,12 @@ import {
   type Conversation,
   type StoredMessage,
 } from '../api/conversations.ts'
+import {
+  decideNote as postDecision,
+  type Note,
+  type NoteDecision,
+  type ProposedNote,
+} from '../api/notes.ts'
 
 export interface ChatMessage {
   id: string
@@ -27,6 +33,8 @@ export interface ChatMessage {
   steps?: Step[]
   /** What the reply's model calls cost. */
   usage?: TurnUsage | null
+  /** Notes the reply proposed for the customer to confirm. */
+  notes?: ProposedNote[]
 }
 
 const FALLBACK_ERROR = "Zoomer couldn't answer right now. Please try again."
@@ -47,6 +55,19 @@ function toChatMessage(message: StoredMessage): ChatMessage {
     citations: message.citations,
     steps: message.steps,
     usage: message.usage,
+    notes: message.notes,
+  }
+}
+
+function withNoteStatus(message: ChatMessage, note: Note): ChatMessage {
+  if (!message.notes?.some((proposed) => proposed.id === note.id)) {
+    return message
+  }
+  return {
+    ...message,
+    notes: message.notes.map((proposed) =>
+      proposed.id === note.id ? { ...proposed, status: note.status } : proposed,
+    ),
   }
 }
 
@@ -58,7 +79,9 @@ function toChatMessage(message: StoredMessage): ChatMessage {
  * token by token. `stop()` cancels the one in progress, and so does unmounting,
  * for example on log out. A message refused before its turn starts (a rate limit,
  * for example) leaves the chat, and `send()` resolves to `false`, so the composer
- * can give the text back. `notesVersion` goes up each time Zoomer saves a note.
+ * can give the text back. A note Zoomer proposes shows under its reply until the
+ * customer decides on it with `decideNote()`, from the reply or the notes panel.
+ * `notesVersion` goes up each time the notes change, so the panel reloads.
  */
 export function useChat() {
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -169,6 +192,19 @@ export function useChat() {
               setNotesVersion((version) => version + 1)
             }
             break
+          case 'pending_note':
+            updateReply((reply) => ({
+              notes: [
+                ...(reply.notes ?? []),
+                {
+                  id: chatEvent.data.note_id,
+                  text: chatEvent.data.text,
+                  status: 'pending',
+                },
+              ],
+            }))
+            setNotesVersion((version) => version + 1)
+            break
           case 'citation':
             updateReply(() => ({ citations: chatEvent.data }))
             break
@@ -218,6 +254,15 @@ export function useChat() {
     replyRequest.current?.abort()
   }
 
+  // Stable, so the memoized message bubbles that get it don't re-render with every token.
+  const decideNote = useCallback(async (id: string, decision: NoteDecision) => {
+    const note = await postDecision(id, decision)
+    setMessages((current) =>
+      current.map((message) => withNoteStatus(message, note)),
+    )
+    setNotesVersion((version) => version + 1)
+  }, [])
+
   function newChat() {
     setActiveId(null)
     setMessages([])
@@ -236,5 +281,6 @@ export function useChat() {
     stop,
     newChat,
     openConversation,
+    decideNote,
   }
 }

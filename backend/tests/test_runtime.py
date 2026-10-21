@@ -11,7 +11,7 @@ from openai.types.responses.response_usage import InputTokensDetails
 
 from app.agent import runtime
 from app.agent.citations import Citations
-from app.agent.prompts import AGENT_INSTRUCTIONS
+from app.agent.context import PendingNote
 from app.agent.runtime import (
     FALLBACK_TEXT,
     MAX_STEPS_TEXT,
@@ -97,7 +97,7 @@ async def _start(
     turns: FakeTurnStore, text: str, retrieved_before: set[str] | None = None
 ) -> NewTurn:
     conversation_id = uuid.uuid4()
-    turn_id = await turns.start(conversation_id)
+    turn_id = await turns.start(conversation_id, "hardened")
     assert turn_id is not None
     return NewTurn(turn_id, conversation_id, uuid.uuid4(), "Mary", text, retrieved_before or set())
 
@@ -167,14 +167,15 @@ async def test_turn_runner_saves_notes_for_the_turns_user(
     first = await _start(fake_turns, "add Jazz Club to my wishlist")
     second = await _start(fake_turns, "add Jazz Club to my wishlist")
 
-    await _run(runner, fake_turns, first)
+    events = await _run(runner, fake_turns, first)
     runner.agent.model = ScriptedModel([[save], [assistant_message("Saved!")]])
     await _run(runner, fake_turns, second)
 
-    assert [(note.user_id, note.turn_id) for note in fake_notes.notes] == [
-        (first.user_id, first.id),
-        (second.user_id, second.id),
+    assert [(note.user_id, note.turn_id, note.status) for note in fake_notes.notes] == [
+        (first.user_id, first.id, "pending"),
+        (second.user_id, second.id, "pending"),
     ]
+    assert PendingNote(note_id=fake_notes.notes[0].id, text="Wishlist: Jazz Club") in events
 
 
 async def test_turn_runner_stops_politely_at_the_step_limit(
@@ -239,7 +240,7 @@ async def test_each_model_call_sends_the_static_prompt_first_and_the_context_not
         "content": [
             {
                 "type": "input_text",
-                "text": AGENT_INSTRUCTIONS,
+                "text": runner.agent.instructions,
                 "prompt_cache_breakpoint": {"mode": "explicit"},
             }
         ],

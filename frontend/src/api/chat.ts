@@ -3,6 +3,7 @@ import type {
   ChatRequest,
   Citations,
   ErrorDetail,
+  PendingNote,
   Step,
   Token,
   ToolCall,
@@ -24,6 +25,8 @@ export type ChatEvent =
   | { event: 'token'; data: Token }
   | { event: 'tool_call'; data: ToolCall }
   | { event: 'tool_result'; data: Step }
+  /** A note `save_note` proposed, waiting for the customer to confirm it. */
+  | { event: 'pending_note'; data: PendingNote }
   | { event: 'citation'; data: Citations }
   /** The turn's model calls: tokens and cost. */
   | { event: 'usage'; data: TurnUsage }

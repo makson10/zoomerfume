@@ -104,6 +104,9 @@ class Turn(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     # {"valid": [...], "invalid": [...], "missing": bool}. Empty while the turn runs.
     citations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The prompt-injection defenses the turn ran with: "hardened", "vulnerable" or the
+    # defenses that were on, e.g. "wrap+confirm".
+    security_mode: Mapped[str] = mapped_column(String(32), nullable=False)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -191,13 +194,20 @@ class Note(Base):
         Uuid, ForeignKey("turns.id", ondelete="SET NULL"), nullable=True
     )
     text: Mapped[str] = mapped_column(String(500), nullable=False)
-    # "confirmed"
+    # "pending" while it waits for the customer, then "confirmed" or "rejected". A note
+    # saved straight away is "confirmed".
     status: Mapped[str] = mapped_column(String(16), server_default="confirmed", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # When the customer confirmed or rejected a pending note. Empty for a note saved
+    # straight away.
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    __table_args__ = (Index("ix_notes_user_created", "user_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_notes_user_created", "user_id", "created_at"),
+        Index("ix_notes_conversation_id", "conversation_id"),
+    )
 
 
 class RateLimit(Base):

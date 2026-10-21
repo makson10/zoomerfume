@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.agent.citations import Citations
+from app.agent.context import PendingNote
 from app.agent.runtime import FALLBACK_TEXT
 from app.core.config import Settings
 from app.db.models import User
@@ -73,7 +74,8 @@ def test_chat_runs_a_turn_and_returns_its_result(
         "steps": [make_step(["KB-031"]).model_dump()],
         "usage": USAGE,
     }
-    assert fake_turns.turns[turn.id].status == "ok"
+    stored = fake_turns.turns[turn.id]
+    assert (stored.status, stored.security_mode) == ("ok", "hardened")
 
 
 def _events(stream: str) -> list[tuple[str, Any]]:
@@ -94,6 +96,8 @@ def test_chat_stream_sends_the_turn_as_events(
     conversation = fake_conversations.add(user.id)
     step = make_step(["KB-031"])
     fake_runner.steps = [step]
+    note = PendingNote(note_id=uuid.uuid4(), text="Wishlist: Jazz Club")
+    fake_runner.pending_notes = [note]
     fake_runner.citations = Citations(valid=["KB-031"])
 
     response = client.post(
@@ -108,6 +112,7 @@ def test_chat_stream_sends_the_turn_as_events(
         ("start", {"conversation_id": str(conversation.id), "turn_id": turn_id}),
         ("tool_call", {"tool": "search_kb", "args": {"query": "vanilla"}}),
         ("tool_result", step.model_dump()),
+        ("pending_note", {"note_id": str(note.note_id), "text": "Wishlist: Jazz Club"}),
         ("token", {"text": "fake reply"}),
         ("citation", {"valid": ["KB-031"], "invalid": [], "missing": False}),
         ("usage", USAGE),
