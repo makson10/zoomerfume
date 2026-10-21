@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from app.agent.context import TurnContext
 from app.agent.tools import build_tools, open_record, search_kb
 from app.agent.tools.save_note import make_save_note
+from app.core.security import SecurityPolicy
 from app.db.models import KbRecord, User
 from tests.fakes import HARDENED, VULNERABLE, FakeKnowledgeBase, FakeNoteStore, make_hit
 
@@ -153,6 +154,22 @@ async def test_save_note_refuses_an_empty_or_long_note(
 
     assert (result["success"], result["code"]) == (False, "INVALID_ARGUMENT")
     assert fake_notes.notes == []
+
+
+async def test_save_note_is_blocked_once_the_turn_has_read_the_knowledge_base(
+    ctx: TurnContext, fake_kb: FakeKnowledgeBase, fake_notes: FakeNoteStore
+) -> None:
+    ctx.security = SecurityPolicy(untrusted_wrap=False, rw_separation=True, confirm_notes=False)
+    fake_kb.hits = [make_hit("KB-097")]
+    save_note = make_save_note(uuid.uuid4())
+
+    saved = await call_tool(save_note, ctx, text="Wishlist: Jazz Club")
+    await call_tool(search_kb, ctx, query="points")
+    blocked = await call_tool(save_note, ctx, text="Points alert: claim them now")
+
+    assert saved["success"] is True
+    assert (blocked["success"], blocked["code"]) == (False, "BLOCKED_UNTRUSTED_CONTEXT")
+    assert [note.text for note in fake_notes.notes] == ["Wishlist: Jazz Club"]
 
 
 def test_schema_endpoint_lists_the_tools_with_strict_schemas(
