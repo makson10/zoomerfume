@@ -34,7 +34,7 @@ from app.agent.citations import Citations, check_citations
 from app.agent.context import Step, TurnContext, TurnStatus
 from app.agent.hooks import UsageHooks
 from app.agent.input_filter import cacheable_input
-from app.agent.prompts import AGENT_INSTRUCTIONS
+from app.agent.prompts import instructions
 from app.agent.streaming import Token, TurnEvent, agent_events
 from app.agent.tools import build_tools
 from app.core.config import Settings
@@ -181,7 +181,7 @@ class TurnRunner:
         # Each turn runs a copy with the customer's own tools.
         self.agent = Agent(
             name="Zoomer",
-            instructions=AGENT_INSTRUCTIONS,
+            instructions=instructions(self._security),
             model=settings.chat_model,
             # The chat model doesn't accept `temperature`; low reasoning effort
             # keeps replies quick and consistent.

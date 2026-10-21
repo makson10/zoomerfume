@@ -5,13 +5,19 @@ from datetime import UTC, datetime
 import pytest
 
 from app.agent.input_filter import context_note
-from app.agent.prompts import AGENT_INSTRUCTIONS
+from app.agent.prompts import AGENT_INSTRUCTIONS, UNTRUSTED_DATA_RULES, instructions
 from app.kb.chunking import count_tokens
+from tests.fakes import HARDENED, VULNERABLE
 
 
 def test_the_static_prompt_is_long_enough_to_cache() -> None:
     assert len(AGENT_INSTRUCTIONS.encode()) >= 6 * 1024
     assert count_tokens(AGENT_INSTRUCTIONS) > 1024
+
+
+def test_the_untrusted_data_rules_come_only_with_the_wrapping() -> None:
+    assert instructions(HARDENED) == f"{AGENT_INSTRUCTIONS}\n{UNTRUSTED_DATA_RULES}"
+    assert instructions(VULNERABLE) == AGENT_INSTRUCTIONS
 
 
 @pytest.mark.parametrize(

@@ -35,3 +35,14 @@ class SecurityPolicy(BaseModel):
         if len(enabled) == len(defenses):
             return "hardened"
         return "+".join(enabled) or "vulnerable"
+
+    def untrusted_text(self, record_id: str, text: str) -> str:
+        """Return a record's text the way the model gets it.
+
+        With ``untrusted_wrap`` on, the text comes inside ``<untrusted_data>`` tags. A
+        closing tag in the text is escaped, so the text can't end the block early.
+        """
+        if not self.untrusted_wrap:
+            return text
+        escaped = text.replace("</untrusted_data>", "&lt;/untrusted_data&gt;")
+        return f'<untrusted_data record="{record_id}">\n{escaped}\n</untrusted_data>'

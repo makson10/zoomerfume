@@ -10,10 +10,14 @@ from app.agent.citations import Citations
 from app.agent.context import Step, TurnStatus
 from app.agent.runtime import NewTurn, TurnResult, TurnStart
 from app.agent.streaming import Token, ToolCall, TurnEvent
+from app.core.security import SecurityPolicy
 from app.db.models import Conversation, KbRecord, Message, Note, ToolStep, Turn, User
 from app.kb.search import Hit
 from app.services.conversations import conversation_title
 from app.services.usage import CallUsage, TurnUsage
+
+HARDENED = SecurityPolicy(untrusted_wrap=True, rw_separation=True, confirm_notes=True)
+VULNERABLE = SecurityPolicy(untrusted_wrap=False, rw_separation=False, confirm_notes=False)
 
 
 class FakeTurnRunner:

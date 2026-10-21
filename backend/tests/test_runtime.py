@@ -11,7 +11,6 @@ from openai.types.responses.response_usage import InputTokensDetails
 
 from app.agent import runtime
 from app.agent.citations import Citations
-from app.agent.prompts import AGENT_INSTRUCTIONS
 from app.agent.runtime import (
     FALLBACK_TEXT,
     MAX_STEPS_TEXT,
@@ -239,7 +238,7 @@ async def test_each_model_call_sends_the_static_prompt_first_and_the_context_not
         "content": [
             {
                 "type": "input_text",
-                "text": AGENT_INSTRUCTIONS,
+                "text": runner.agent.instructions,
                 "prompt_cache_breakpoint": {"mode": "explicit"},
             }
         ],
