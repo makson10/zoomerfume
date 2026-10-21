@@ -32,7 +32,7 @@ async def test_lists_own_notes_newest_first_without_rejected_ones(
 
 
 @pytest.mark.parametrize(("action", "status"), [("confirm", "confirmed"), ("reject", "rejected")])
-async def test_the_customer_confirms_or_rejects_own_pending_notes_only(
+async def test_the_customer_decides_once_on_own_pending_notes_only(
     client: TestClient,
     user: User,
     fake_users: FakeUserStore,
@@ -45,10 +45,13 @@ async def test_the_customer_confirms_or_rejects_own_pending_notes_only(
     foreign = await fake_notes.add(stranger.id, uuid.uuid4(), uuid.uuid4(), "Ann's", "pending")
 
     decided = client.post(f"/api/notes/{note.id}/{action}")
+    again = client.post(f"/api/notes/{note.id}/confirm")
     hidden = client.post(f"/api/notes/{foreign.id}/{action}")
 
     assert decided.status_code == 200
     assert (decided.json()["id"], decided.json()["status"]) == (str(note.id), status)
+    assert (again.status_code, again.json()["error"]["code"]) == (409, "NOTE_DECIDED")
+    assert note.status == status
     assert hidden.status_code == 404
     assert foreign.status == "pending"
 

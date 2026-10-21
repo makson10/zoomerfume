@@ -538,7 +538,7 @@
           "notes"
         ],
         "summary": "Confirm Note",
-        "description": "Save a note Zoomer proposed. Only the customer can do this, from the web chat: the\nmodel has no tool for it.\n\nRaises:\n    ApiError: 404 when the user has no such note.",
+        "description": "Save a note Zoomer proposed. Only the customer can do this, from the web chat: the\nmodel has no tool for it.\n\nRaises:\n    ApiError: 404 when the user has no such note, 409 when it was already decided.",
         "operationId": "confirm_note_api_notes__note_id__confirm_post",
         "parameters": [
           {
@@ -582,7 +582,7 @@
           "notes"
         ],
         "summary": "Reject Note",
-        "description": "Drop a note Zoomer proposed. It leaves the notes panel.\n\nRaises:\n    ApiError: 404 when the user has no such note.",
+        "description": "Drop a note Zoomer proposed. It leaves the notes panel.\n\nRaises:\n    ApiError: 404 when the user has no such note, 409 when it was already decided.",
         "operationId": "reject_note_api_notes__note_id__reject_post",
         "parameters": [
           {

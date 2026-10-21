@@ -1,5 +1,6 @@
 import { Button, Group, Paper, Stack, Text } from '@mantine/core'
 import { useState } from 'react'
+import { ApiError } from '../api/client.ts'
 import type { NoteDecision, ProposedNote } from '../api/notes.ts'
 
 interface PendingNoteCardProps {
@@ -14,7 +15,7 @@ interface PendingNoteCardProps {
  */
 export function PendingNoteCard({ note, onDecide }: PendingNoteCardProps) {
   const [deciding, setDeciding] = useState<NoteDecision | null>(null)
-  const [failed, setFailed] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   if (note.status !== 'pending') {
     return (
@@ -27,11 +28,15 @@ export function PendingNoteCard({ note, onDecide }: PendingNoteCardProps) {
 
   async function decide(decision: NoteDecision) {
     setDeciding(decision)
-    setFailed(false)
+    setError(null)
     try {
       await onDecide(note.id, decision)
-    } catch {
-      setFailed(true)
+    } catch (error) {
+      setError(
+        error instanceof ApiError && error.code
+          ? error.message
+          : "Couldn't store your choice. Please try again.",
+      )
     } finally {
       setDeciding(null)
     }
@@ -65,9 +70,9 @@ export function PendingNoteCard({ note, onDecide }: PendingNoteCardProps) {
             Don't save
           </Button>
         </Group>
-        {failed && (
+        {error && (
           <Text size="xs" c="red">
-            Couldn't store your choice. Please try again.
+            {error}
           </Text>
         )}
       </Stack>

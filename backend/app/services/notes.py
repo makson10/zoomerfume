@@ -60,17 +60,27 @@ class NoteStore:
     async def decide(
         self, note_id: uuid.UUID, user_id: uuid.UUID, status: NoteStatus
     ) -> Note | None:
-        """Store the customer's decision on one of their notes and return the note, or
-        ``None`` when the user has no such note."""
+        """Store the customer's decision on one of their pending notes and return the note,
+        or ``None`` when the user has no pending note with this id.
+
+        A note is decided once: a second decision, e.g. from another tab, changes nothing.
+        """
         async with self._sessionmaker() as session:
             note = await session.scalar(
                 update(Note)
-                .where(Note.id == note_id, Note.user_id == user_id)
+                .where(Note.id == note_id, Note.user_id == user_id, Note.status == "pending")
                 .values(status=status, decided_at=func.now())
                 .returning(Note)
             )
             await session.commit()
             return note
+
+    async def get_for_user(self, note_id: uuid.UUID, user_id: uuid.UUID) -> Note | None:
+        """Return the user's note, or ``None`` when the user has no note with this id."""
+        async with self._sessionmaker() as session:
+            return await session.scalar(
+                select(Note).where(Note.id == note_id, Note.user_id == user_id)
+            )
 
     async def proposals(self, conversation_id: uuid.UUID) -> list[Note]:
         """Return the notes in the conversation that waited for the customer, the oldest

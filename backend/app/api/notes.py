@@ -46,9 +46,15 @@ async def _decide(
     notes: NoteStore, note_id: uuid.UUID, user: User, decision: NoteStatus
 ) -> NoteOut:
     note = await notes.decide(note_id, user.id, decision)
-    if note is None:
+    if note is not None:
+        return NoteOut.model_validate(note)
+    if await notes.get_for_user(note_id, user.id) is None:
         raise ApiError(status.HTTP_404_NOT_FOUND, "NOT_FOUND", "Note not found.")
-    return NoteOut.model_validate(note)
+    raise ApiError(
+        status.HTTP_409_CONFLICT,
+        "NOTE_DECIDED",
+        "You've already saved or dropped this note, maybe in another tab.",
+    )
 
 
 @router.post("/{note_id}/confirm")
@@ -57,7 +63,7 @@ async def confirm_note(note_id: uuid.UUID, user: CurrentUser, notes: Notes) -> N
     model has no tool for it.
 
     Raises:
-        ApiError: 404 when the user has no such note.
+        ApiError: 404 when the user has no such note, 409 when it was already decided.
     """
     return await _decide(notes, note_id, user, "confirmed")
 
@@ -67,6 +73,6 @@ async def reject_note(note_id: uuid.UUID, user: CurrentUser, notes: Notes) -> No
     """Drop a note Zoomer proposed. It leaves the notes panel.
 
     Raises:
-        ApiError: 404 when the user has no such note.
+        ApiError: 404 when the user has no such note, 409 when it was already decided.
     """
     return await _decide(notes, note_id, user, "rejected")

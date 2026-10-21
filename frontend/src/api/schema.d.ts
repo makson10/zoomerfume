@@ -294,7 +294,7 @@ export interface paths {
      *     model has no tool for it.
      *
      *     Raises:
-     *         ApiError: 404 when the user has no such note.
+     *         ApiError: 404 when the user has no such note, 409 when it was already decided.
      */
     post: operations['confirm_note_api_notes__note_id__confirm_post']
     delete?: never
@@ -317,7 +317,7 @@ export interface paths {
      * @description Drop a note Zoomer proposed. It leaves the notes panel.
      *
      *     Raises:
-     *         ApiError: 404 when the user has no such note.
+     *         ApiError: 404 when the user has no such note, 409 when it was already decided.
      */
     post: operations['reject_note_api_notes__note_id__reject_post']
     delete?: never

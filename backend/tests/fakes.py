@@ -204,10 +204,14 @@ class FakeNoteStore:
     async def decide(
         self, note_id: uuid.UUID, user_id: uuid.UUID, status: NoteStatus
     ) -> Note | None:
-        note = next((n for n in self.notes if n.id == note_id and n.user_id == user_id), None)
-        if note is not None:
-            note.status, note.decided_at = status, datetime.now(UTC)
+        note = await self.get_for_user(note_id, user_id)
+        if note is None or note.status != "pending":
+            return None
+        note.status, note.decided_at = status, datetime.now(UTC)
         return note
+
+    async def get_for_user(self, note_id: uuid.UUID, user_id: uuid.UUID) -> Note | None:
+        return next((n for n in self.notes if n.id == note_id and n.user_id == user_id), None)
 
     async def proposals(self, conversation_id: uuid.UUID) -> list[Note]:
         return [
