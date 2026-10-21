@@ -1,4 +1,4 @@
-import { ActionIcon, AppShell, Burger, Button, Text } from '@mantine/core'
+import { ActionIcon, AppShell, Box, Burger, Button, Text } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { IconLogout, IconNotes, IconTool } from '@tabler/icons-react'
 import { useState } from 'react'
@@ -7,6 +7,7 @@ import { useChat } from '../hooks/useChat.ts'
 import { ChatPanel } from './ChatPanel.tsx'
 import { ConversationList } from './ConversationList.tsx'
 import { Header } from './Header.tsx'
+import { ModeBadge } from './ModeBadge.tsx'
 import { NotesPanel } from './NotesPanel.tsx'
 import { RecordDrawer } from './RecordDrawer.tsx'
 import { ToolsModal } from './ToolsModal.tsx'
@@ -20,7 +21,9 @@ interface ChatPageProps {
 /**
  * The signed-in page: conversations on the left, the open chat in the middle and the
  * customer's notes on the right. Cited records open in a drawer, and the header shows
- * the tool schemas. On smaller screens the conversations and the notes fold away.
+ * the security mode and the tool schemas. On smaller screens the conversations and the
+ * notes fold away, and the security mode moves above the conversations, where it has
+ * room.
  */
 export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
   const chat = useChat()
@@ -76,6 +79,9 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
           }
           actions={
             <>
+              <Box visibleFrom="md">
+                <ModeBadge security={user.security} />
+              </Box>
               <Text size="sm" visibleFrom="sm">
                 {user.name}
               </Text>
@@ -136,6 +142,9 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
         />
       </AppShell.Header>
       <AppShell.Navbar p="sm">
+        <Box hiddenFrom="md" pb="xs">
+          <ModeBadge security={user.security} />
+        </Box>
         <ConversationList
           conversations={chat.conversations}
           activeId={chat.activeId}
@@ -145,7 +154,7 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
         />
       </AppShell.Navbar>
       <AppShell.Aside p="sm">
-        <NotesPanel refreshKey={chat.notesVersion} />
+        <NotesPanel refreshKey={chat.notesVersion} onDecide={chat.decideNote} />
       </AppShell.Aside>
       <AppShell.Main h="100dvh">
         <ChatPanel
@@ -160,6 +169,7 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
           onSend={chat.send}
           onStop={chat.stop}
           onOpenRecord={setRecordId}
+          onDecideNote={chat.decideNote}
         />
       </AppShell.Main>
       <RecordDrawer recordId={recordId} onClose={() => setRecordId(null)} />

@@ -17,6 +17,12 @@ function formatArgs(args: Record<string, unknown>): string {
     .join(', ')
 }
 
+/** Red for a failed or refused call. A note waiting for the customer isn't a failure. */
+function resultColor(step: Step): string | undefined {
+  if (step.success) return undefined
+  return step.code === 'CONFIRMATION_REQUIRED' ? 'orange' : 'red'
+}
+
 function StepRow({ step }: { step: Step }) {
   let result: string
   if (!step.success) result = step.code ?? 'failed'
@@ -26,7 +32,7 @@ function StepRow({ step }: { step: Step }) {
   return (
     <Text size="xs">
       {step.step}. <Code>{step.tool}</Code>({formatArgs(step.args)}) →{' '}
-      <Text span inherit c={step.success ? undefined : 'red'}>
+      <Text span inherit c={resultColor(step)}>
         {result}
       </Text>{' '}
       <Text span inherit c="dimmed">

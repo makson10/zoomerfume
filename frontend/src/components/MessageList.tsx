@@ -1,5 +1,6 @@
 import { Alert, Loader, Stack, Text } from '@mantine/core'
 import { useEffect, useRef } from 'react'
+import type { NoteDecision } from '../api/notes.ts'
 import type { ChatMessage } from '../hooks/useChat.ts'
 import { MessageBubble } from './MessageBubble.tsx'
 
@@ -10,6 +11,7 @@ interface MessageListProps {
   /** Shown while there are no messages yet. */
   emptyText?: string
   onOpenRecord?: (recordId: string) => void
+  onDecideNote?: (id: string, decision: NoteDecision) => Promise<void>
 }
 
 export function MessageList({
@@ -18,6 +20,7 @@ export function MessageList({
   error,
   emptyText,
   onOpenRecord,
+  onDecideNote,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -37,6 +40,7 @@ export function MessageList({
           key={message.id}
           message={message}
           onOpenRecord={onOpenRecord}
+          onDecideNote={onDecideNote}
         />
       ))}
       {loading && <Loader type="dots" size="sm" />}

@@ -8,14 +8,20 @@ import {
   Title,
 } from '@mantine/core'
 import { useEffect, useState } from 'react'
-import { fetchNotes, type Note } from '../api/notes.ts'
+import { fetchNotes, type Note, type NoteDecision } from '../api/notes.ts'
+import { PendingNoteCard } from './PendingNoteCard.tsx'
 
 const savedAt = new Intl.DateTimeFormat('en-GB', {
   dateStyle: 'medium',
   timeStyle: 'short',
 })
 
-function NoteList({ notes }: { notes: Note[] }) {
+interface NoteListProps {
+  notes: Note[]
+  onDecide: (id: string, decision: NoteDecision) => Promise<void>
+}
+
+function NoteList({ notes, onDecide }: NoteListProps) {
   if (notes.length === 0) {
     return (
       <Text size="sm" c="dimmed">
@@ -25,27 +31,36 @@ function NoteList({ notes }: { notes: Note[] }) {
   }
   return (
     <Stack gap="xs">
-      {notes.map((note) => (
-        <Paper key={note.id} withBorder p="xs">
-          <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-            {note.text}
-          </Text>
-          <Text size="xs" c="dimmed">
-            {savedAt.format(new Date(note.created_at))}
-          </Text>
-        </Paper>
-      ))}
+      {notes.map((note) =>
+        note.status === 'pending' ? (
+          <PendingNoteCard key={note.id} note={note} onDecide={onDecide} />
+        ) : (
+          <Paper key={note.id} withBorder p="xs">
+            <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+              {note.text}
+            </Text>
+            <Text size="xs" c="dimmed">
+              {savedAt.format(new Date(note.created_at))}
+            </Text>
+          </Paper>
+        ),
+      )}
     </Stack>
   )
 }
 
 interface NotesPanelProps {
-  /** Changes each time Zoomer saves a note, so the panel reloads. */
+  /** Changes each time the notes change, so the panel reloads. */
   refreshKey: number
+  /** Confirms or rejects a pending note. */
+  onDecide: (id: string, decision: NoteDecision) => Promise<void>
 }
 
-/** The customer's notes, the newest first. Zoomer saves them with `save_note`. */
-export function NotesPanel({ refreshKey }: NotesPanelProps) {
+/**
+ * The customer's notes, the newest first. Zoomer saves them with `save_note`. Notes
+ * that wait for the customer's confirmation show the same card as under the reply.
+ */
+export function NotesPanel({ refreshKey, onDecide }: NotesPanelProps) {
   const [notes, setNotes] = useState<Note[] | null>(null)
   const [error, setError] = useState(false)
 
@@ -75,7 +90,7 @@ export function NotesPanel({ refreshKey }: NotesPanelProps) {
         {error ? (
           <Alert color="red">Couldn't load your notes. Please try again.</Alert>
         ) : notes ? (
-          <NoteList notes={notes} />
+          <NoteList notes={notes} onDecide={onDecide} />
         ) : (
           <Loader type="dots" />
         )}
