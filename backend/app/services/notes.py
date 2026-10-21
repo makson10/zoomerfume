@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import Note
+
+# A note proposed in hardened mode is "pending" until the customer confirms or rejects it.
+NoteStatus = Literal["pending", "confirmed", "rejected"]
 
 
 class NoteStore:
@@ -26,15 +30,16 @@ class NoteStore:
         conversation_id: uuid.UUID,
         turn_id: uuid.UUID,
         text: str,
+        status: NoteStatus,
     ) -> Note:
-        """Save a confirmed note for the user, with the conversation and turn it came from."""
+        """Save a note for the user, with the conversation and turn it came from."""
         note = Note(
             id=uuid.uuid4(),
             user_id=user_id,
             conversation_id=conversation_id,
             turn_id=turn_id,
             text=text,
-            status="confirmed",
+            status=status,
         )
         async with self._sessionmaker() as session:
             session.add(note)
@@ -42,12 +47,45 @@ class NoteStore:
         return note
 
     async def list_for_user(self, user_id: uuid.UUID, limit: int) -> list[Note]:
-        """Return the user's newest notes, the newest first."""
+        """Return the user's newest notes, the newest first. Rejected notes are left out."""
         async with self._sessionmaker() as session:
             result = await session.scalars(
                 select(Note)
-                .where(Note.user_id == user_id)
+                .where(Note.user_id == user_id, Note.status != "rejected")
                 .order_by(Note.created_at.desc())
                 .limit(limit)
+            )
+            return list(result)
+
+    async def decide(
+        self, note_id: uuid.UUID, user_id: uuid.UUID, status: NoteStatus
+    ) -> Note | None:
+        """Store the customer's decision on one of their notes and return the note, or
+        ``None`` when the user has no such note."""
+        async with self._sessionmaker() as session:
+            note = await session.scalar(
+                update(Note)
+                .where(Note.id == note_id, Note.user_id == user_id)
+                .values(status=status, decided_at=func.now())
+                .returning(Note)
+            )
+            await session.commit()
+            return note
+
+    async def proposals(self, conversation_id: uuid.UUID) -> list[Note]:
+        """Return the notes in the conversation that waited for the customer, the oldest
+        first.
+
+        They are the pending ones and the decided ones. A note saved straight away was never
+        decided, so it isn't one of them.
+        """
+        async with self._sessionmaker() as session:
+            result = await session.scalars(
+                select(Note)
+                .where(
+                    Note.conversation_id == conversation_id,
+                    or_(Note.status == "pending", Note.decided_at.is_not(None)),
+                )
+                .order_by(Note.created_at)
             )
             return list(result)

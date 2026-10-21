@@ -193,7 +193,8 @@ export interface paths {
      *
      *     ``start`` names the conversation and the turn, which is how the web chat learns the id
      *     of a new conversation. ``token`` events carry the reply as the model writes it, and each
-     *     tool call sends ``tool_call`` and then ``tool_result`` with its step. The stream ends
+     *     tool call sends ``tool_call`` and then ``tool_result`` with its step. A note that waits
+     *     for the customer's confirmation follows its step as ``pending_note``. The stream ends
      *     with ``citation``, ``usage`` (the turn's tokens and cost) and ``done``. ``done`` carries
      *     the stored reply, which replaces the streamed text, because the fallback and step-limit
      *     texts are never streamed. ``error`` ends a stream that broke. Closing the connection
@@ -266,10 +267,59 @@ export interface paths {
     /**
      * List Notes
      * @description Return the user's notes, the newest first, at most :data:`NOTES_LIMIT` of them.
+     *
+     *     Pending notes are included, rejected ones are not.
      */
     get: operations['list_notes_api_notes_get']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/notes/{note_id}/confirm': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Confirm Note
+     * @description Save a note Zoomer proposed. Only the customer can do this, from the web chat: the
+     *     model has no tool for it.
+     *
+     *     Raises:
+     *         ApiError: 404 when the user has no such note.
+     */
+    post: operations['confirm_note_api_notes__note_id__confirm_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/notes/{note_id}/reject': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Reject Note
+     * @description Drop a note Zoomer proposed. It leaves the notes panel.
+     *
+     *     Raises:
+     *         ApiError: 404 when the user has no such note.
+     */
+    post: operations['reject_note_api_notes__note_id__reject_post']
     delete?: never
     options?: never
     head?: never
@@ -366,7 +416,7 @@ export interface components {
      * @description One logged message of a conversation's transcript.
      *
      *     Zoomer's replies also carry how their turn ended, their checked citations, the tool
-     *     calls behind them and what the turn's model calls cost.
+     *     calls behind them, what the turn's model calls cost and the notes it proposed.
      */
     MessageOut: {
       /** Id */
@@ -389,6 +439,11 @@ export interface components {
        */
       steps: components['schemas']['Step'][]
       usage: components['schemas']['TurnUsage'] | null
+      /**
+       * Notes
+       * @default []
+       */
+      notes: components['schemas']['NoteOut'][]
     }
     /**
      * NewPhone
@@ -418,10 +473,28 @@ export interface components {
       /** Text */
       text: string
       /**
+       * Status
+       * @enum {string}
+       */
+      status: 'pending' | 'confirmed' | 'rejected'
+      /**
        * Created At
        * Format: date-time
        */
       created_at: string
+    }
+    /**
+     * PendingNote
+     * @description A note ``save_note`` proposed. It waits for the customer to confirm or reject it.
+     */
+    PendingNote: {
+      /**
+       * Note Id
+       * Format: uuid
+       */
+      note_id: string
+      /** Text */
+      text: string
     }
     /** PhoneRequest */
     PhoneRequest: {
@@ -652,6 +725,7 @@ export type KnownPhone = components['schemas']['KnownPhone']
 export type MessageOut = components['schemas']['MessageOut']
 export type NewPhone = components['schemas']['NewPhone']
 export type NoteOut = components['schemas']['NoteOut']
+export type PendingNote = components['schemas']['PendingNote']
 export type PhoneRequest = components['schemas']['PhoneRequest']
 export type RecordOut = components['schemas']['RecordOut']
 export type SecurityPolicy = components['schemas']['SecurityPolicy']
@@ -1026,6 +1100,68 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['NoteOut'][]
+        }
+      }
+      /** @description Client Error */
+      '4XX': {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorBody']
+        }
+      }
+    }
+  }
+  confirm_note_api_notes__note_id__confirm_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        note_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NoteOut']
+        }
+      }
+      /** @description Client Error */
+      '4XX': {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorBody']
+        }
+      }
+    }
+  }
+  reject_note_api_notes__note_id__reject_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        note_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NoteOut']
         }
       }
       /** @description Client Error */

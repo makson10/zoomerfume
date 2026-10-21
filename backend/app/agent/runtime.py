@@ -238,7 +238,7 @@ class TurnRunner:
         streamed = ""
         try:
             yield TurnStart(conversation_id=turn.conversation_id, turn_id=turn.id)
-            async for event in agent_events(result, ctx.steps):
+            async for event in agent_events(result, ctx):
                 if isinstance(event, Token):
                     streamed += event.text
                 yield event

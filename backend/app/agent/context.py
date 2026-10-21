@@ -34,6 +34,13 @@ class Step(BaseModel):
     duration_ms: int
 
 
+class PendingNote(BaseModel):
+    """A note ``save_note`` proposed. It waits for the customer to confirm or reject it."""
+
+    note_id: uuid.UUID
+    text: str
+
+
 @dataclass
 class TurnContext:
     """Mutable context passed into ``Runner.run(..., context=ctx)``.
@@ -60,6 +67,8 @@ class TurnContext:
     steps: list[Step] = field(default_factory=list)
     # The model calls of this turn: the agent's chat calls and the searches' embeddings.
     calls: list[CallUsage] = field(default_factory=list)
+    # The notes this turn proposed, in the order they were proposed.
+    pending_notes: list[PendingNote] = field(default_factory=list)
     status: TurnStatus = "ok"
 
     @property

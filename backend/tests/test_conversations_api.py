@@ -5,7 +5,13 @@ from fastapi.testclient import TestClient
 from app.agent.citations import Citations
 from app.db.models import Message, User
 from app.services.usage import CallUsage
-from tests.fakes import FakeConversationStore, FakeTurnStore, FakeUserStore, make_step
+from tests.fakes import (
+    FakeConversationStore,
+    FakeNoteStore,
+    FakeTurnStore,
+    FakeUserStore,
+    make_step,
+)
 
 
 def test_lists_own_conversations_most_recent_first(
@@ -26,12 +32,13 @@ def test_lists_own_conversations_most_recent_first(
     ]
 
 
-def test_returns_the_transcript_of_own_conversations_only(
+async def test_returns_the_transcript_of_own_conversations_only(
     client: TestClient,
     user: User,
     fake_users: FakeUserStore,
     fake_conversations: FakeConversationStore,
     fake_turns: FakeTurnStore,
+    fake_notes: FakeNoteStore,
 ) -> None:
     own = fake_conversations.add(user.id)
     citations = Citations(valid=["KB-012"], invalid=[], missing=False)
@@ -45,6 +52,8 @@ def test_returns_the_transcript_of_own_conversations_only(
         Message(id=1, role="user", content="hi", turn_id=turn.id),
         Message(id=2, role="assistant", content="hey [KB-012]!", turn_id=turn.id),
     ]
+    proposed = await fake_notes.add(user.id, own.id, turn.id, "Wishlist: Jazz Club", "pending")
+    await fake_notes.add(user.id, own.id, turn.id, "Saved straight away", "confirmed")
     foreign = fake_conversations.add(fake_users.add("+48512345678", "Ann").id)
 
     transcript = client.get(f"/api/conversations/{own.id}/messages")
@@ -61,6 +70,7 @@ def test_returns_the_transcript_of_own_conversations_only(
             "citations": None,
             "steps": [],
             "usage": None,
+            "notes": [],
         },
         {
             "id": 2,
@@ -78,6 +88,14 @@ def test_returns_the_transcript_of_own_conversations_only(
                 "output_tokens": 100,
                 "cost_usd": "0.000408200",
             },
+            "notes": [
+                {
+                    "id": str(proposed.id),
+                    "text": "Wishlist: Jazz Club",
+                    "status": "pending",
+                    "created_at": proposed.created_at.isoformat().replace("+00:00", "Z"),
+                }
+            ],
         },
     ]
     assert hidden.status_code == 404

@@ -7,13 +7,14 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 from app.agent.citations import Citations
-from app.agent.context import Step, TurnStatus
+from app.agent.context import PendingNote, Step, TurnStatus
 from app.agent.runtime import NewTurn, TurnResult, TurnStart
 from app.agent.streaming import Token, ToolCall, TurnEvent
 from app.core.security import SecurityPolicy
 from app.db.models import Conversation, KbRecord, Message, Note, ToolStep, Turn, User
 from app.kb.search import Hit
 from app.services.conversations import conversation_title
+from app.services.notes import NoteStatus
 from app.services.usage import CallUsage, TurnUsage
 
 HARDENED = SecurityPolicy(untrusted_wrap=True, rw_separation=True, confirm_notes=True)
@@ -22,7 +23,7 @@ VULNERABLE = SecurityPolicy(untrusted_wrap=False, rw_separation=False, confirm_n
 
 class FakeTurnRunner:
     """Stands in for ``TurnRunner``: records each turn and streams a canned reply, status,
-    steps and model calls, then stores the turn like the real runner."""
+    steps, proposed notes and model calls, then stores the turn like the real runner."""
 
     reply = "fake reply"
     status: TurnStatus = "ok"
@@ -30,6 +31,7 @@ class FakeTurnRunner:
     def __init__(self) -> None:
         self.calls: list[NewTurn] = []
         self.steps: list[Step] = []
+        self.pending_notes: list[PendingNote] = []
         self.citations = Citations()
         self.model_calls = [CallUsage("chat", "gpt-6-luna", 2000, 1800, 100, 50)]
 
@@ -41,6 +43,8 @@ class FakeTurnRunner:
         for step in self.steps:
             yield ToolCall(tool=step.tool, args=step.args)
             yield step
+        for note in self.pending_notes:
+            yield note
         yield Token(text=self.reply)
         await turns.finish(turn.id, self.status, self.citations, self.steps, self.model_calls)
         yield TurnResult(
@@ -172,7 +176,12 @@ class FakeNoteStore:
         self.notes: list[Note] = []
 
     async def add(
-        self, user_id: uuid.UUID, conversation_id: uuid.UUID, turn_id: uuid.UUID, text: str
+        self,
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        turn_id: uuid.UUID,
+        text: str,
+        status: NoteStatus,
     ) -> Note:
         note = Note(
             id=uuid.uuid4(),
@@ -180,14 +189,33 @@ class FakeNoteStore:
             conversation_id=conversation_id,
             turn_id=turn_id,
             text=text,
-            status="confirmed",
+            status=status,
             created_at=datetime.now(UTC),
         )
         self.notes.append(note)
         return note
 
     async def list_for_user(self, user_id: uuid.UUID, limit: int) -> list[Note]:
-        return [note for note in reversed(self.notes) if note.user_id == user_id][:limit]
+        listed = [
+            n for n in reversed(self.notes) if n.user_id == user_id and n.status != "rejected"
+        ]
+        return listed[:limit]
+
+    async def decide(
+        self, note_id: uuid.UUID, user_id: uuid.UUID, status: NoteStatus
+    ) -> Note | None:
+        note = next((n for n in self.notes if n.id == note_id and n.user_id == user_id), None)
+        if note is not None:
+            note.status, note.decided_at = status, datetime.now(UTC)
+        return note
+
+    async def proposals(self, conversation_id: uuid.UUID) -> list[Note]:
+        return [
+            n
+            for n in self.notes
+            if n.conversation_id == conversation_id
+            and (n.status == "pending" or n.decided_at is not None)
+        ]
 
 
 def make_step(record_ids: list[str]) -> Step:

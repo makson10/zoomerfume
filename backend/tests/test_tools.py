@@ -9,7 +9,7 @@ from agents import FunctionTool
 from agents.tool_context import ToolContext
 from fastapi.testclient import TestClient
 
-from app.agent.context import TurnContext
+from app.agent.context import PendingNote, TurnContext
 from app.agent.tools import build_tools, open_record, search_kb
 from app.agent.tools.save_note import make_save_note
 from app.core.security import SecurityPolicy
@@ -170,6 +170,19 @@ async def test_save_note_is_blocked_once_the_turn_has_read_the_knowledge_base(
     assert saved["success"] is True
     assert (blocked["success"], blocked["code"]) == (False, "BLOCKED_UNTRUSTED_CONTEXT")
     assert [note.text for note in fake_notes.notes] == ["Wishlist: Jazz Club"]
+
+
+async def test_save_note_proposes_a_pending_note_when_confirmation_is_on(
+    ctx: TurnContext, fake_notes: FakeNoteStore
+) -> None:
+    ctx.security = SecurityPolicy(untrusted_wrap=False, rw_separation=False, confirm_notes=True)
+
+    result = await call_tool(make_save_note(uuid.uuid4()), ctx, text="Wishlist: Jazz Club")
+
+    [note] = fake_notes.notes
+    assert (result["success"], result["code"]) == (False, "CONFIRMATION_REQUIRED")
+    assert note.status == "pending"
+    assert ctx.pending_notes == [PendingNote(note_id=note.id, text="Wishlist: Jazz Club")]
 
 
 def test_schema_endpoint_lists_the_tools_with_strict_schemas(

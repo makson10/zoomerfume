@@ -13,7 +13,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent.citations import Citations
-from app.agent.context import Step, TurnStatus
+from app.agent.context import PendingNote, Step, TurnStatus
 from app.agent.runtime import FALLBACK_TEXT, NewTurn, TurnResult, TurnStart
 from app.agent.streaming import Token, ToolCall
 from app.api.conversations import require_conversation
@@ -53,8 +53,18 @@ class TurnDone(BaseModel):
 
 
 # The ``data`` of each stream event, in event order: start, token, tool_call, tool_result,
-# citation, usage, done, or error.
-ChatEventData = TurnStart | Token | ToolCall | Step | Citations | TurnUsage | TurnDone | ErrorDetail
+# pending_note, citation, usage, done, or error.
+ChatEventData = (
+    TurnStart
+    | Token
+    | ToolCall
+    | Step
+    | PendingNote
+    | Citations
+    | TurnUsage
+    | TurnDone
+    | ErrorDetail
+)
 
 
 async def start_turn(
@@ -187,7 +197,8 @@ async def chat_stream(
 
     ``start`` names the conversation and the turn, which is how the web chat learns the id
     of a new conversation. ``token`` events carry the reply as the model writes it, and each
-    tool call sends ``tool_call`` and then ``tool_result`` with its step. The stream ends
+    tool call sends ``tool_call`` and then ``tool_result`` with its step. A note that waits
+    for the customer's confirmation follows its step as ``pending_note``. The stream ends
     with ``citation``, ``usage`` (the turn's tokens and cost) and ``done``. ``done`` carries
     the stored reply, which replaces the streamed text, because the fallback and step-limit
     texts are never streamed. ``error`` ends a stream that broke. Closing the connection
@@ -215,6 +226,8 @@ async def chat_stream(
                         yield ServerSentEvent(event="tool_call", data=event)
                     case Step():
                         yield ServerSentEvent(event="tool_result", data=event)
+                    case PendingNote():
+                        yield ServerSentEvent(event="pending_note", data=event)
                     case TurnResult():
                         yield ServerSentEvent(event="citation", data=event.citations)
                         yield ServerSentEvent(event="usage", data=event.usage)
