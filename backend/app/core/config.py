@@ -4,6 +4,8 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.security import SecurityPolicy
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -77,6 +79,20 @@ class Settings(BaseSettings):
     harden_confirm_notes: bool | None = None
 
     debug: bool = False
+
+    @property
+    def security(self) -> SecurityPolicy:
+        """The prompt-injection defenses that are on: each ``HARDEN_*`` setting, or the
+        mode where that setting is unset."""
+        hardened = self.security_mode == "hardened"
+        overrides = {
+            "untrusted_wrap": self.harden_untrusted_wrap,
+            "rw_separation": self.harden_rw_separation,
+            "confirm_notes": self.harden_confirm_notes,
+        }
+        return SecurityPolicy(
+            **{name: hardened if on is None else on for name, on in overrides.items()}
+        )
 
 
 def get_settings() -> Settings:

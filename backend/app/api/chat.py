@@ -20,7 +20,6 @@ from app.api.conversations import require_conversation
 from app.api.deps import AppSettings, Conversations, CurrentUser, Runtime, Turns, limit_chat
 from app.api.errors import ApiError, ErrorDetail
 from app.core.config import Settings
-from app.core.security import SecurityPolicy
 from app.db.models import User
 from app.services.conversations import ConversationStore
 from app.services.cost_report import COST_COMMAND, NOTHING_YET, cost_report
@@ -91,19 +90,7 @@ async def start_turn(
     else:
         conversation = await require_conversation(conversations, body.conversation_id, user)
         retrieved_before = await turns.retrieved_ids(conversation.id)
-    hardened = settings.security_mode == "hardened"
-    security = SecurityPolicy(
-        untrusted_wrap=hardened
-        if settings.harden_untrusted_wrap is None
-        else settings.harden_untrusted_wrap,
-        rw_separation=hardened
-        if settings.harden_rw_separation is None
-        else settings.harden_rw_separation,
-        confirm_notes=hardened
-        if settings.harden_confirm_notes is None
-        else settings.harden_confirm_notes,
-    )
-    turn_id = await turns.start(conversation.id, security.mode)
+    turn_id = await turns.start(conversation.id, settings.security.mode)
     if turn_id is None:
         raise ApiError(
             status.HTTP_409_CONFLICT,

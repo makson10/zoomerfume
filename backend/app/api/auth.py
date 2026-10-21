@@ -73,21 +73,6 @@ class SignInResponse(BaseModel):
     message: str
 
 
-def _security_policy(settings: Settings) -> SecurityPolicy:
-    hardened = settings.security_mode == "hardened"
-    return SecurityPolicy(
-        untrusted_wrap=hardened
-        if settings.harden_untrusted_wrap is None
-        else settings.harden_untrusted_wrap,
-        rw_separation=hardened
-        if settings.harden_rw_separation is None
-        else settings.harden_rw_separation,
-        confirm_notes=hardened
-        if settings.harden_confirm_notes is None
-        else settings.harden_confirm_notes,
-    )
-
-
 def _valid_phone(raw: str, settings: Settings) -> str:
     phone = validate_phone(raw, settings.phone_default_region)
     if phone is None:
@@ -118,7 +103,7 @@ async def sign_in_with_phone(
     sign_in(request, user)
     return KnownPhone(
         status="known",
-        user=UserOut.of(user, _security_policy(settings)),
+        user=UserOut.of(user, settings.security),
         message=f"Welcome back, {user.name}! {GREETING}",
     )
 
@@ -148,7 +133,7 @@ async def create_account(
     user = await users.get_or_create(phone, name)
     sign_in(request, user)
     message = f"Nice to meet you, {user.name}! {GREETING}"
-    return SignInResponse(user=UserOut.of(user, _security_policy(settings)), message=message)
+    return SignInResponse(user=UserOut.of(user, settings.security), message=message)
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -160,4 +145,4 @@ async def log_out(request: Request) -> None:
 @router.get("/me")
 async def me(user: CurrentUser, settings: AppSettings) -> UserOut:
     """Return the signed-in user and the security mode, or 401 if nobody is signed in."""
-    return UserOut.of(user, _security_policy(settings))
+    return UserOut.of(user, settings.security)
