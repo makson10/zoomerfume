@@ -4,7 +4,7 @@ How the knowledge base gets from Markdown files into Qdrant, how search works, a
 
 ## The corpus
 
-`backend/corpus/` holds 96 records, one Markdown file each (`KB-001.md` … `KB-096.md`): 40 product cards, 18 policies, 8 company pages, 20 FAQ answers and 10 news posts, about 45,000 words. Every file starts with a YAML header, followed by a Markdown body split into `##` sections.
+`backend/corpus/` holds 97 records, one Markdown file each (`KB-001.md` … `KB-097.md`): 40 product cards, 19 policies, 8 company pages, 20 FAQ answers and 10 news posts, about 46,000 words. KB-097 is the poisoned record of the prompt-injection lab ([security.md](security.md)). Every file starts with a YAML header, followed by a Markdown body split into `##` sections.
 
 ```yaml
 ---
@@ -39,13 +39,13 @@ Records link to each other as plain IDs ("see KB-052"). Zoomer cites as `[KB-052
 4. Every chunk after the first starts with the last ~75 tokens (about 15%) of the chunk before it, cut at a line, sentence or word boundary. A fact near a boundary can then be found from either side.
 5. Each chunk gets a breadcrumb such as `Creed Aventus › Notes, How it wears`. The breadcrumb is embedded together with the chunk text, so a chunk deep in a record still carries the record's subject.
 
-The result is deterministic: the same file always gives the same chunks. The full corpus gives 206 chunks, 78–494 tokens each (median 370), 77,554 tokens to embed. With `text-embedding-3-small` at $0.02 per million tokens, a full ingest costs about $0.0016.
+The result is deterministic: the same file always gives the same chunks. The full corpus gives 208 chunks, 78–494 tokens each (median 370), 78,163 tokens to embed. With `text-embedding-3-small` at $0.02 per million tokens, a full ingest costs about $0.0016.
 
 We tried packing less. With the same 500-token limit, sections were only merged while the chunk stayed under a smaller budget:
 
 | Packing budget | Chunks | hit@1 | hit@5 |
 |---|---|---|---|
-| up to ~500 tokens (current) | 206 | 15/20 | 19/20 |
+| up to ~500 tokens (current) | 208 | 15/20 | 19/20 |
 | up to 250 tokens | 367 | 14/20 | 17/20 |
 | up to 150 tokens | 587 | 16/20 | 18/20 |
 
@@ -76,7 +76,7 @@ The proof is `indexed_vectors_count` in the collection info. We loaded the same 
 curl -s localhost:6333/collections/kb_chunks | jq '.result | {status, points_count, indexed_vectors_count}'
 ```
 
-The ingest command waits until Qdrant has finished building the index and prints both numbers. On a fresh collection the two numbers are equal. After any re-embed or delete (`--force`, a changed or removed record), `indexed_vectors_count` is higher than `points_count` and stays that way: replaced and deleted vectors remain in the index, and Qdrant vacuums only segments with at least 1,000 vectors (`vacuum_min_vector_number`), more than this whole collection. A `--force` run gives 206 points and 285 indexed vectors, for example. Search is not affected, because deleted vectors are never returned.
+The ingest command waits until Qdrant has finished building the index and prints both numbers. On a fresh collection the two numbers are equal. After any re-embed or delete (`--force`, a changed or removed record), `indexed_vectors_count` is higher than `points_count` and stays that way: replaced and deleted vectors remain in the index, and Qdrant vacuums only segments with at least 1,000 vectors (`vacuum_min_vector_number`), more than this whole collection. A `--force` run, for example, leaves 208 points and more indexed vectors than that. Search is not affected, because deleted vectors are never returned.
 
 A filtered search that leaves only a few points, for example only products under 3,000 ₴, may be answered by checking those points exactly instead of walking the graph. Qdrant's query planner decides this, and for a corpus this small it's the faster path.
 
@@ -91,13 +91,13 @@ A filtered search that leaves only a few points, for example only products under
 A second run right after the first embeds nothing:
 
 ```
-Records: 96 total, 96 changed, 0 skipped, 0 deleted
-Chunks: 206 embedded, 77,554 tokens
-Qdrant kb_chunks: 206 points, 206 indexed vectors (HNSW)
+Records: 97 total, 97 changed, 0 skipped, 0 deleted
+Chunks: 208 embedded, 78,163 tokens
+Qdrant kb_chunks: 208 points, 208 indexed vectors (HNSW)
 
-Records: 96 total, 0 changed, 96 skipped, 0 deleted
+Records: 97 total, 0 changed, 97 skipped, 0 deleted
 Chunks: 0 embedded, 0 tokens
-Qdrant kb_chunks: 206 points, 206 indexed vectors (HNSW)
+Qdrant kb_chunks: 208 points, 208 indexed vectors (HNSW)
 ```
 
 `--force` re-embeds everything, which is needed after a change to the chunking or the embedding model. `--dry-run` shows what would change without calling OpenAI or writing anything.
