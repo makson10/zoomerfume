@@ -39,10 +39,11 @@ class SecurityPolicy(BaseModel):
     def untrusted_text(self, record_id: str, text: str) -> str:
         """Return a record's text the way the model gets it.
 
-        With ``untrusted_wrap`` on, the text comes inside ``<untrusted_data>`` tags. A
-        closing tag in the text is escaped, so the text can't end the block early.
+        With ``untrusted_wrap`` on, the text comes inside ``<untrusted_data>`` tags. Every
+        ``<`` in the text is escaped, so no closing tag in it, whatever its case or spacing,
+        can end the block early.
         """
         if not self.untrusted_wrap:
             return text
-        escaped = text.replace("</untrusted_data>", "&lt;/untrusted_data&gt;")
+        escaped = text.replace("<", "&lt;")
         return f'<untrusted_data record="{record_id}">\n{escaped}\n</untrusted_data>'
