@@ -81,23 +81,25 @@ async def replace_record_chunks(
         for chunk, vector in zip(chunks, vectors, strict=True)
     ]
     await client.upsert(name, points=points, wait=True)
-    stale = models.Filter(
-        must=[
-            models.FieldCondition(key="record_id", match=models.MatchValue(value=header.id)),
-            models.FieldCondition(key="chunk_index", range=models.Range(gte=len(chunks))),
-        ]
-    )
-    await client.delete(name, points_selector=models.FilterSelector(filter=stale), wait=True)
+    stale = _record_chunks(header.id, from_index=len(chunks))
+    await client.delete(name, points_selector=stale, wait=True)
 
 
 async def delete_record_chunks(client: AsyncQdrantClient, name: str, record_id: str) -> None:
     """Delete every chunk of a record."""
-    selector = models.FilterSelector(
+    await client.delete(name, points_selector=_record_chunks(record_id), wait=True)
+
+
+def _record_chunks(record_id: str, from_index: int = 0) -> models.FilterSelector:
+    """Select a record's chunks from ``from_index`` on."""
+    return models.FilterSelector(
         filter=models.Filter(
-            must=[models.FieldCondition(key="record_id", match=models.MatchValue(value=record_id))]
+            must=[
+                models.FieldCondition(key="record_id", match=models.MatchValue(value=record_id)),
+                models.FieldCondition(key="chunk_index", range=models.Range(gte=from_index)),
+            ]
         )
     )
-    await client.delete(name, points_selector=selector, wait=True)
 
 
 async def wait_until_indexed(

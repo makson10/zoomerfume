@@ -1,8 +1,4 @@
-"""Durable message log: one row per user message and one per Zoomer reply.
-
-Side-written after the reply is produced. Guarded so a database hiccup never
-delays or breaks a turn.
-"""
+"""The message log: one row per customer message and one per Zoomer reply."""
 
 from __future__ import annotations
 
@@ -21,27 +17,16 @@ if TYPE_CHECKING:
 async def record_turn_messages(
     sessionmaker: async_sessionmaker[AsyncSession], ctx: TurnContext, reply: str
 ) -> None:
-    """Persist the user message + Zoomer's reply for a turn.
+    """Write the turn's customer message and Zoomer's reply. Fail-open, like every log write.
 
     A turn stopped before Zoomer wrote anything has no reply row.
     """
-    rows = [
-        Message(
-            conversation_id=ctx.conversation_id,
-            role="user",
-            content=ctx.user_message,
-            turn_id=ctx.turn_id,
-        )
-    ]
-    if reply:
-        rows.append(
-            Message(
-                conversation_id=ctx.conversation_id,
-                role="assistant",
-                content=reply,
-                turn_id=ctx.turn_id,
-            )
-        )
     async with sessionmaker() as session:
-        session.add_all(rows)
+        session.add_all(
+            Message(
+                conversation_id=ctx.conversation_id, role=role, content=content, turn_id=ctx.turn_id
+            )
+            for role, content in [("user", ctx.user_message), ("assistant", reply)]
+            if content
+        )
         await session.commit()

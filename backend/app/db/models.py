@@ -22,9 +22,11 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from app.db.base import Base
+
+class Base(DeclarativeBase):
+    """Base class for all tables."""
 
 
 class User(Base):
