@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   streamMessage,
+  type ChatEvent,
   type Citations,
   type Step,
   type TurnStatus,
@@ -51,6 +52,48 @@ function toChatMessage(message: StoredMessage): ChatMessage {
     usage: message.usage,
     notes: message.notes,
   }
+}
+
+type ReplyEvent = Exclude<ChatEvent, { event: 'start' | 'error' }>
+
+/** How one stream event changes the reply that is streaming in. */
+function replyChange(
+  reply: ChatMessage,
+  chatEvent: ReplyEvent,
+): Partial<ChatMessage> {
+  switch (chatEvent.event) {
+    case 'token':
+      return { content: reply.content + chatEvent.data.text, activeTool: null }
+    case 'tool_call':
+      return { activeTool: chatEvent.data.tool }
+    case 'tool_result':
+      return {
+        steps: [...(reply.steps ?? []), chatEvent.data],
+        activeTool: null,
+      }
+    case 'pending_note': {
+      const { note_id: id, text } = chatEvent.data
+      return {
+        notes: [...(reply.notes ?? []), { id, text, status: 'pending' }],
+      }
+    }
+    case 'citation':
+      return { citations: chatEvent.data }
+    case 'usage':
+      return { usage: chatEvent.data }
+    case 'done':
+      return { content: chatEvent.data.reply, status: chatEvent.data.status }
+  }
+}
+
+/** A proposed note, or a note saved right away, changes what the notes panel shows. */
+function changesNotes(chatEvent: ReplyEvent): boolean {
+  if (chatEvent.event === 'pending_note') return true
+  return (
+    chatEvent.event === 'tool_result' &&
+    chatEvent.data.tool === 'save_note' &&
+    chatEvent.data.success
+  )
 }
 
 function withNoteStatus(message: ChatMessage, note: Note): ChatMessage {
@@ -168,52 +211,14 @@ export function useChat() {
             setActiveId(chatEvent.data.conversation_id)
             listConversations().then(setConversations, () => undefined)
             break
-          case 'token':
-            updateReply((reply) => ({
-              content: reply.content + chatEvent.data.text,
-              activeTool: null,
-            }))
-            break
-          case 'tool_call':
-            updateReply(() => ({ activeTool: chatEvent.data.tool }))
-            break
-          case 'tool_result':
-            updateReply((reply) => ({
-              steps: [...(reply.steps ?? []), chatEvent.data],
-              activeTool: null,
-            }))
-            if (chatEvent.data.tool === 'save_note' && chatEvent.data.success) {
-              setNotesVersion((version) => version + 1)
-            }
-            break
-          case 'pending_note':
-            updateReply((reply) => ({
-              notes: [
-                ...(reply.notes ?? []),
-                {
-                  id: chatEvent.data.note_id,
-                  text: chatEvent.data.text,
-                  status: 'pending',
-                },
-              ],
-            }))
-            setNotesVersion((version) => version + 1)
-            break
-          case 'citation':
-            updateReply(() => ({ citations: chatEvent.data }))
-            break
-          case 'usage':
-            updateReply(() => ({ usage: chatEvent.data }))
-            break
-          case 'done':
-            done = true
-            updateReply(() => ({
-              content: chatEvent.data.reply,
-              status: chatEvent.data.status,
-            }))
-            break
           case 'error':
             throw new ApiError(500, chatEvent.data.code, chatEvent.data.message)
+          default:
+            if (chatEvent.event === 'done') done = true
+            if (changesNotes(chatEvent)) {
+              setNotesVersion((version) => version + 1)
+            }
+            updateReply((reply) => replyChange(reply, chatEvent))
         }
       }
       if (!done) throw new Error('The reply stream ended early.')
