@@ -46,8 +46,8 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
   - `agent/`: Zoomer's runtime (`runtime.py`), the turn events and their mapping from the SDK's stream (`streaming.py`), the static system prompt (`prompts.py`), the order of each model call's input (`input_filter.py`), the usage hook (`hooks.py`), per-turn context, the citation check (`citations.py`) and the tools (`tools/`: `build_tools()`, the envelope and its guard, `search_kb`, `open_record`, `save_note`)
   - `core/`: settings, logging setup, phone and name validation (`validators.py`), the prompt-injection defenses that are on (`security.py`)
   - `db/`: SQLAlchemy engine, models, fail-open write guard, message log
-  - `kb/`: the knowledge base: record parsing (`corpus.py`), chunking (`chunking.py`), embeddings, Qdrant storage (`store.py`), the `kb_records` table (`records.py`), search and record lookups for the tools and the API (`knowledge_base.py`), and the command-line tools `ingest`, `search`, `check_corpus` and `eval_rephrase`
-  - `eval/`: the evaluation scripts that run real turns in-process (`turns.py`): `injection` and `unanswerable`
+  - `kb/`: the knowledge base: record parsing (`corpus.py`), chunking (`chunking.py`), embeddings, Qdrant storage (`store.py`), the `kb_records` table (`records.py`), search and record lookups for the tools and the API (`knowledge_base.py`), and the command-line tools `ingest`, `search` and `check_corpus`
+  - `eval/`: the evaluation scripts: `rephrase` (retrieval), and `injection` and `unanswerable`, which run real turns in-process (`turns.py`)
   - `middleware/`: per-request logging context
   - `services/`: OpenAI and Qdrant client constructors, users and the session cookie (`auth.py`), conversations (`conversations.py`), rate limits (`rate_limit.py`), turns, tool steps and model calls (`turns.py`), notes (`notes.py`), model prices (`pricing.py`), per-call and per-turn usage (`usage.py`), the `/cost` report (`cost_report.py`)
 - `backend/alembic/`: database migrations (`versions/0001_messages.py`, ...)
@@ -96,7 +96,7 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
   - `python -m app.kb.ingest [--force] [--dry-run]`: load the corpus into Qdrant and `kb_records`
   - `python -m app.kb.search "query" [-k 5] [--type product] [--max-price 3000]`: search the knowledge base
   - `python -m app.kb.check_corpus [corpus_dir]`: consistency checks, no services or settings needed
-  - `python -m app.kb.eval_rephrase [--file eval/rephrase.yaml] [-k 5]`: hit@1 and hit@k for rephrased questions
+  - `python -m app.eval.rephrase [--file eval/rephrase.yaml] [-k 5]`: hit@1 and hit@k for rephrased questions
   - `python -m app.api.openapi`: write the OpenAPI schema to `openapi.json`, no services or secrets needed
   - `python -m app.eval.injection [--runs 5] [--file eval/injection.yaml]`: ask the poisoned record's question under five setups (vulnerable, each defense alone, hardened) and count saved, pending, blocked and untried notes
   - `python -m app.eval.unanswerable [--file eval/unanswerable.yaml]`: ask questions the knowledge base can't answer and check that each reply says Zoomer doesn't know; exits 1 on a failure
@@ -236,7 +236,7 @@ Knowledge base (needs the stack up; ingest and search call the OpenAI embeddings
 ```bash
 docker compose run --rm api python -m app.kb.ingest            # second run: everything skipped
 docker compose run --rm api python -m app.kb.search "vanilla and tobacco" --type product --max-price 3000
-docker compose run --rm api python -m app.kb.eval_rephrase     # target: hit@5 ≥ 90%
+docker compose run --rm api python -m app.eval.rephrase        # target: hit@5 ≥ 90%
 docker compose run --rm api python -m app.eval.injection --runs 5   # vulnerable 5/5 saved, hardened 0/5
 docker compose run --rm api python -m app.eval.unanswerable        # every reply says Zoomer doesn't know
 curl -s localhost:6333/collections/kb_chunks                   # points_count, indexed_vectors_count

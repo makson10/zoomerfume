@@ -142,7 +142,7 @@ Search it and check retrieval quality:
 
 ```bash
 docker compose run --rm api python -m app.kb.search "something warm for winter" --type product --max-price 3000
-docker compose run --rm api python -m app.kb.eval_rephrase    # hit@1 / hit@5 on rephrased questions
+docker compose run --rm api python -m app.eval.rephrase       # hit@1 / hit@5 on rephrased questions
 ```
 
 How chunking, the HNSW index and the rephrase check work, with results: [docs/retrieval.md](docs/retrieval.md).
