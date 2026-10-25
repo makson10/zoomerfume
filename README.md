@@ -26,24 +26,26 @@ Postgres (users, conversations, agent history, turns and tool steps, message log
           knowledge base records, notes, model call costs)
 ```
 
-One Docker image runs the API and serves the built web chat. Postgres and Qdrant run as separate services. How a chat turn works (streaming, Stop, tools, notes, the error envelope, the 5-step cap, citations, prompt caching and costs): [docs/architecture.md](docs/architecture.md). The prompt-injection attack and the defenses against it: [docs/security.md](docs/security.md).
+One Docker image runs the API and serves the built web chat. Postgres and Qdrant run as separate services. Before the API starts, the same image runs the database migrations and loads the knowledge base as two one-off Compose services. What Compose sets up (the network, DNS, volumes, startup order) and what survives a restart: [docs/compose.md](docs/compose.md). How a chat turn works (streaming, Stop, tools, notes, the error envelope, the 5-step cap, citations, prompt caching and costs): [docs/architecture.md](docs/architecture.md). The prompt-injection attack and the defenses against it: [docs/security.md](docs/security.md).
 
 ## Quick start (Docker)
 
 Requirements: Docker Desktop and an OpenAI API key.
 
 ```bash
-cp .env.example .env          # then set OPENAI_API_KEY and SESSION_SECRET in .env
+cp .env.example .env          # then set OPENAI_API_KEY, SESSION_SECRET and DB_PASSWORD in .env
 docker compose up --build
 ```
 
-`SESSION_SECRET` signs the session cookie; generate one with `openssl rand -hex 32`.
+`SESSION_SECRET` signs the session cookie; generate one with `openssl rand -hex 32`. `DB_PASSWORD` is the Postgres password, which has no default: `openssl rand -hex 16`.
+
+`up` starts Postgres and Qdrant, applies the database migrations (`migrate`), loads the knowledge base (`ingest`) and then starts the API. The first start embeds the whole knowledge base for well under one cent; later starts skip the records that haven't changed.
 
 Open http://localhost:8000. Zoomer asks for your phone number, and for your name if the number is new. There is no SMS code, since the shop is fictional. Your conversations are listed on the left; "New chat" starts another one. Log out to switch to a different customer.
 
-To answer shop questions, Zoomer needs the knowledge base loaded first (see [Load the knowledge base](#load-the-knowledge-base)). Then ask something like "vanilla and tobacco under 3,000 ₴?": while Zoomer searches you see which tool it is using, then the answer streams in. It cites records as chips (click one to read the full record), and the line under it shows which tools Zoomer used. A general question such as "EDP vs EDT?" shows "No tools used". Ask Zoomer to add a perfume to your wishlist: Zoomer proposes the note in a card under its answer, and **Save** puts it in the **Notes** panel on the right (behind the **Notes** button on smaller screens). The badge in the header shows the security mode the server runs in. The Stop button next to the message box stops a reply halfway; what Zoomer wrote so far stays. Under each answer you see what it cost, and typing `/cost` shows the whole conversation's cost per turn (see [Caching and cost](#caching-and-cost)). The **Tools** button shows the exact tool schemas the model receives.
+Ask something like "vanilla and tobacco under 3,000 ₴?": while Zoomer searches you see which tool it is using, then the answer streams in. It cites records as chips (click one to read the full record), and the line under it shows which tools Zoomer used. A general question such as "EDP vs EDT?" shows "No tools used". Ask Zoomer to add a perfume to your wishlist: Zoomer proposes the note in a card under its answer, and **Save** puts it in the **Notes** panel on the right (behind the **Notes** button on smaller screens). The badge in the header shows the security mode the server runs in. The Stop button next to the message box stops a reply halfway; what Zoomer wrote so far stays. Under each answer you see what it cost, and typing `/cost` shows the whole conversation's cost per turn (see [Caching and cost](#caching-and-cost)). The **Tools** button shows the exact tool schemas the model receives.
 
-`docker compose up` also loads `docker-compose.override.yml` (auto-reload, host ports for Postgres and Qdrant). Add `--watch` to sync backend code changes into the running container.
+`docker compose up` also loads `docker-compose.override.yml` (auto-reload, Postgres and Qdrant ports on `localhost`). Add `--watch` to sync backend code changes into the running container.
 
 Or talk to the API directly. The session lives in a cookie, so keep a cookie jar:
 
@@ -73,7 +75,17 @@ curl -b jar localhost:8000/api/notes               # the customer's notes, newes
 curl -b jar -X POST localhost:8000/api/notes/<note id>/confirm   # the customer saves it; /reject drops it
 ```
 
-A message without a `conversation_id` starts a new conversation, titled after the message; the stream's first event, `start`, carries its id. Send another message with that `conversation_id` to continue the conversation. `/api/chat/stream` sends the reply as it is written; `/api/chat` runs the same turn and returns it in one piece. A conversation answers one message at a time: a message sent while a reply is still running gets a 409. A note Zoomer proposes arrives in the stream as a `pending_note` event right after its `tool_result`. Health check: `curl localhost:8000/health`.
+A message without a `conversation_id` starts a new conversation, titled after the message; the stream's first event, `start`, carries its id. Send another message with that `conversation_id` to continue the conversation. `/api/chat/stream` sends the reply as it is written; `/api/chat` runs the same turn and returns it in one piece. A conversation answers one message at a time: a message sent while a reply is still running gets a 409. A note Zoomer proposes arrives in the stream as a `pending_note` event right after its `tool_result`.
+
+Health and readiness, no sign-in needed:
+
+```bash
+curl localhost:8000/health        # {"status": "ok"}: the process is up
+curl localhost:8000/ready         # Postgres, migrations and the knowledge base; 503 until all three pass
+curl localhost:8000/api/whoami    # {"hostname": "...", "version": "dev"}: the container that answered
+```
+
+Every response also names the container that answered in its `X-Served-By` header.
 
 ## Why the model can never pass a user id
 
@@ -116,33 +128,38 @@ Record KB-097, a normal-looking loyalty policy, hides an instruction for Zoomer:
 - **Vulnerable mode** (`SECURITY_MODE=vulnerable`): the step log shows `search_kb` and then `save_note`, and the attacker's reminder appears in the notes panel.
 - **Hardened mode** (the default): knowledge base text reaches the model inside `<untrusted_data>` tags, with a prompt rule that it is data, never instructions; `save_note` refuses to write after a search in the same message (`BLOCKED_UNTRUSTED_CONTEXT`); and every note waits as a card until the customer saves or drops it (`CONFIRMATION_REQUIRED`). The attack fails.
 
-`HARDEN_UNTRUSTED_WRAP`, `HARDEN_RW_SEPARATION` and `HARDEN_CONFIRM_NOTES` turn one defense on or off, to show which one stops the attack. After changing `.env`, run `docker compose up -d api` and start a new chat. Two scripts check it with the real model (the stack must be up, the knowledge base loaded):
+`HARDEN_UNTRUSTED_WRAP`, `HARDEN_RW_SEPARATION` and `HARDEN_CONFIRM_NOTES` turn one defense on or off, to show which one stops the attack. After changing `.env`, run `docker compose up -d api` and start a new chat. Two scripts check it with the real model (the stack must be up):
 
 ```bash
-docker compose run --rm api python -m app.eval.injection --runs 5   # vulnerable 5/5 saved, hardened 0/5
-docker compose run --rm api python -m app.eval.unanswerable        # questions the knowledge base can't answer
+docker compose exec api python -m app.eval.injection --runs 5   # vulnerable 5/5 saved, hardened 0/5
+docker compose exec api python -m app.eval.unanswerable        # questions the knowledge base can't answer
 ```
 
 The attack, each defense and the results: [docs/security.md](docs/security.md).
 
-## Load the knowledge base
+## Knowledge base
 
-The knowledge base lives in `backend/corpus/`: one Markdown file per record. Zoomer searches it to answer shop questions. Load it into Qdrant (and the `kb_records` table) once the stack is up:
+The knowledge base lives in `backend/corpus/`: one Markdown file per record. Zoomer searches it to answer shop questions. The `ingest` service loads it into Qdrant (and the `kb_records` table) on every `docker compose up`, before the API starts:
 
-```bash
-docker compose run --rm api python -m app.kb.ingest
-# Records: 97 total, 97 changed, 0 skipped, 0 deleted
-# Chunks: 208 embedded, 78,163 tokens
-# Qdrant kb_chunks: 208 points, 208 indexed vectors (HNSW)
+```
+$ docker compose logs ingest
+Records: 97 total, 97 changed, 0 skipped, 0 deleted
+Chunks: 208 embedded, 78,163 tokens
+Qdrant kb_chunks: 208 points, 208 indexed vectors (HNSW)
 ```
 
-Run it again after editing the corpus. Unchanged records are skipped, so a re-run only embeds what changed; `--force` re-embeds everything and `--dry-run` shows what would change. A full load costs well under one cent.
+The corpus is part of the image, so after editing it run `docker compose up --build`. Unchanged records are skipped, so a re-run only embeds what changed. A full load costs well under one cent. To re-embed everything, or to see what would change:
+
+```bash
+docker compose run --rm ingest python -m app.kb.ingest --force
+docker compose run --rm ingest python -m app.kb.ingest --dry-run
+```
 
 Search it and check retrieval quality:
 
 ```bash
-docker compose run --rm api python -m app.kb.search "something warm for winter" --type product --max-price 3000
-docker compose run --rm api python -m app.eval.rephrase       # hit@1 / hit@5 on rephrased questions
+docker compose exec api python -m app.kb.search "something warm for winter" --type product --max-price 3000
+docker compose exec api python -m app.eval.rephrase       # hit@1 / hit@5 on rephrased questions
 ```
 
 How chunking, the HNSW index and the rephrase check work, with results: [docs/retrieval.md](docs/retrieval.md).
@@ -163,7 +180,7 @@ uv run uvicorn --factory app.main:create_app --reload
 When the API runs on the host, point it at `localhost` instead of the Compose service names, e.g. by exporting these (environment variables take precedence over `.env`):
 
 ```bash
-export DATABASE_URL=postgresql+asyncpg://zoomer:zoomer@localhost:5432/zoomerfume
+export DB_HOST=localhost
 export QDRANT_URL=http://localhost:6333
 ```
 
@@ -206,7 +223,8 @@ All settings come from environment variables (`.env` for local runs). See `.env.
 | `CHAT_MODEL` | `gpt-6-luna` | Model behind Zoomer |
 | `AGENT_MAX_TURNS` | `5` | Max model calls per message; past it Zoomer says it couldn't finish |
 | `HISTORY_WINDOW_TURNS` | `12` | How many recent user turns the model sees |
-| `DATABASE_URL` | local Compose DSN | Postgres connection (asyncpg) |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` | `postgres`, `5432`, `zoomerfume`, `zoomer` | Postgres connection; Compose also creates the database and its user from `DB_NAME` and `DB_USER` |
+| `DB_PASSWORD` | (required) | Postgres password; the app and Compose refuse to start without it |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant connection |
 | `QDRANT_COLLECTION` | `kb_chunks` | Qdrant collection for the knowledge base |
 | `CORPUS_DIR` | `corpus` | Folder with the knowledge base records |
@@ -218,6 +236,7 @@ All settings come from environment variables (`.env` for local runs). See `.env.
 | `RATE_LIMIT_AUTH_PER_MIN` | `10` | Sign-in attempts per IP address per minute |
 | `SECURITY_MODE` | `hardened` | `hardened` turns on all three prompt-injection defenses, `vulnerable` turns them off |
 | `HARDEN_UNTRUSTED_WRAP`, `HARDEN_RW_SEPARATION`, `HARDEN_CONFIRM_NOTES` | (follow the mode) | Turn one defense on or off whatever `SECURITY_MODE` says |
+| `APP_VERSION` | `dev` | The release version. Compose builds the image with it and tags it `zoomerfume:<version>`; `/api/whoami` reports it |
 
 ## Project layout
 
@@ -225,18 +244,17 @@ All settings come from environment variables (`.env` for local runs). See `.env.
 zoomerfume/
 ├── backend/
 │   ├── app/
-│   │   ├── api/          HTTP routes (health, auth, conversations, chat, records, tool schemas, notes), web chat mount, OpenAPI export
+│   │   ├── api/          HTTP routes (health, readiness and whoami, auth, conversations, chat, records, tool schemas, notes), web chat mount, OpenAPI export
 │   │   ├── agent/        Zoomer: agent runtime, turn events, prompt and model input order, usage hook, per-turn context, tools, citation check
 │   │   ├── core/         settings, logging, input validation, the security mode
 │   │   ├── db/           SQLAlchemy engine, models, message log
 │   │   ├── eval/         the prompt-injection and unanswerable question checks
 │   │   ├── kb/           knowledge base: parsing, chunking, ingest, search, checks
-│   │   ├── middleware/   request logging context
-│   │   └── services/     OpenAI and Qdrant clients, users, conversations, rate limits, turns, notes, prices, usage, the /cost report
+│   │   ├── middleware/   request logging context, the X-Served-By header
+│   │   └── services/     OpenAI and Qdrant clients, users, conversations, rate limits, turns, notes, prices, usage, the /cost report, readiness checks
 │   ├── alembic/          database migrations
 │   ├── corpus/           knowledge base records (KB-001.md …)
 │   ├── eval/             questions for the retrieval, prompt-injection and unanswerable checks
-│   ├── scripts/          container entrypoint
 │   ├── tests/            pytest unit tests
 │   ├── openapi.json      the API's OpenAPI schema (generated)
 │   └── pyproject.toml    uv project (Python 3.12)
@@ -247,9 +265,10 @@ zoomerfume/
 ├── docs/retrieval.md             chunking, HNSW and retrieval results
 ├── docs/architecture.md          a chat turn: streaming, Stop, tools, notes, error envelope, step cap, citations, caching and costs
 ├── docs/security.md              the prompt-injection lab: the attack, three defenses, results, modes
+├── docs/compose.md               what Compose sets up: network, DNS, volumes, startup order, restart test
 ├── .github/workflows/ci.yml      CI pipeline
 ├── Dockerfile
-├── docker-compose.yml            api + postgres + qdrant
+├── docker-compose.yml            migrate + ingest (one-off), api, postgres, qdrant
 ├── docker-compose.override.yml   dev overrides
 └── .env.example
 ```
