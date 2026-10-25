@@ -27,6 +27,7 @@ from app.core.logging import setup_logging
 from app.db.engine import create_db_engine
 from app.kb.knowledge_base import KnowledgeBase
 from app.middleware.request_context import FastAPILoggingMiddleware
+from app.middleware.served_by import ServedByMiddleware
 from app.services.clients import create_openai_client, create_qdrant_client
 from app.services.notes import NoteStore
 from app.services.readiness import Readiness, migration_head
@@ -96,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
 
+    app.add_middleware(ServedByMiddleware)
     app.add_middleware(FastAPILoggingMiddleware)
     app.add_middleware(
         SessionMiddleware,

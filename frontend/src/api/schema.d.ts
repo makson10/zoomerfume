@@ -49,6 +49,28 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/whoami': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Whoami
+     * @description Which replica answered: its hostname (the pod name in Kubernetes) and the app version.
+     *
+     *     No sign-in needed. Every response also names the replica in ``X-Served-By``.
+     */
+    get: operations['whoami_api_whoami_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/auth/phone': {
     parameters: {
       query?: never
@@ -751,6 +773,16 @@ export interface components {
       phone_masked: string
       security: components['schemas']['SecurityPolicy']
     }
+    /**
+     * WhoAmI
+     * @description The replica that answered and the app version it runs.
+     */
+    WhoAmI: {
+      /** Hostname */
+      hostname: string
+      /** Version */
+      version: string
+    }
   }
   responses: never
   parameters: never
@@ -783,6 +815,7 @@ export type TurnResult = components['schemas']['TurnResult']
 export type TurnStart = components['schemas']['TurnStart']
 export type TurnUsage = components['schemas']['TurnUsage']
 export type UserOut = components['schemas']['UserOut']
+export type WhoAmI = components['schemas']['WhoAmI']
 export type $defs = Record<string, never>
 export interface operations {
   health_check_health_get: {
@@ -841,6 +874,35 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ReadinessOut']
+        }
+      }
+      /** @description Client Error */
+      '4XX': {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorBody']
+        }
+      }
+    }
+  }
+  whoami_api_whoami_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WhoAmI']
         }
       }
       /** @description Client Error */

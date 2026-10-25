@@ -1,6 +1,8 @@
-"""The readiness probe: each check's result and the status code."""
+"""The readiness probe, and /api/whoami with the X-Served-By header."""
 
 from __future__ import annotations
+
+import socket
 
 import pytest
 from fastapi.testclient import TestClient
@@ -62,3 +64,10 @@ def test_a_hanging_or_failing_service_is_reported_without_details(
         "qdrant": "unavailable",
     }
     assert "6333" not in response.text
+
+
+def test_whoami_and_every_response_name_the_replica(client: TestClient) -> None:
+    response = client.get("/api/whoami")
+
+    assert response.json() == {"hostname": socket.gethostname(), "version": "dev"}
+    assert client.get("/health").headers["X-Served-By"] == socket.gethostname()

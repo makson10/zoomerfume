@@ -84,6 +84,38 @@
         }
       }
     },
+    "/api/whoami": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Whoami",
+        "description": "Which replica answered: its hostname (the pod name in Kubernetes) and the app version.\n\nNo sign-in needed. Every response also names the replica in ``X-Served-By``.",
+        "operationId": "whoami_api_whoami_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhoAmI"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/phone": {
       "post": {
         "tags": [
@@ -1436,6 +1468,25 @@
         ],
         "title": "UserOut",
         "description": "The signed-in user as the web chat sees them, with the security mode the server\nruns in. The phone is masked."
+      },
+      "WhoAmI": {
+        "properties": {
+          "hostname": {
+            "type": "string",
+            "title": "Hostname"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hostname",
+          "version"
+        ],
+        "title": "WhoAmI",
+        "description": "The replica that answered and the app version it runs."
       }
     }
   }
