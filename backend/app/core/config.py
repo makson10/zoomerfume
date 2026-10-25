@@ -3,6 +3,7 @@ from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 from app.core.security import SecurityPolicy
 
@@ -36,8 +37,12 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 
-    # It needs the asyncpg driver: postgresql+asyncpg://...
-    database_url: str = "postgresql+asyncpg://zoomer:zoomer@postgres:5432/zoomerfume"
+    db_host: str = "postgres"
+    db_port: int = 5432
+    db_name: str = "zoomerfume"
+    db_user: str = "zoomer"
+    # No default, so the app doesn't start without one.
+    db_password: str = Field(min_length=1)
     db_pool_size: int = 10
     db_max_overflow: int = 5
     # Logs every SQL statement.
@@ -62,6 +67,20 @@ class Settings(BaseSettings):
     harden_confirm_notes: bool | None = None
 
     debug: bool = False
+    # The release version. The image sets it at build time from the APP_VERSION build arg.
+    app_version: str = "dev"
+
+    @property
+    def database_url(self) -> URL:
+        """The asyncpg connection URL built from the ``DB_*`` settings."""
+        return URL.create(
+            "postgresql+asyncpg",
+            username=self.db_user,
+            password=self.db_password,
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
+        )
 
     @property
     def security(self) -> SecurityPolicy:

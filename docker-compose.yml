@@ -1,27 +1,55 @@
+# One app image runs three services: `migrate` and `ingest` run once and exit,
+# then `api` starts. docs/compose.md explains the startup order.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app: &app
+  build:
+    context: .
+    args:
+      APP_VERSION: ${APP_VERSION:-dev}
+  image: zoomerfume:${APP_VERSION:-dev}
+  env_file:
+    - .env
+  logging: *logging
+
 services:
+  migrate:
+    <<: *app
+    command: [ "alembic", "upgrade", "head" ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ingest:
+    <<: *app
+    command: [ "python", "-m", "app.kb.ingest" ]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
+
   api:
-    build: .
+    <<: *app
     restart: unless-stopped
     ports:
       - "127.0.0.1:8000:8000"
-    env_file:
-      - .env
     depends_on:
-      qdrant:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      ingest:
+        condition: service_completed_successfully
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   qdrant:
     image: qdrant/qdrant:v1.19.1
@@ -34,32 +62,24 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *logging
 
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17.11-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-zoomer}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zoomer}
-      POSTGRES_DB: ${POSTGRES_DB:-zoomerfume}
+      POSTGRES_USER: ${DB_USER:?set DB_USER in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      POSTGRES_DB: ${DB_NAME:?set DB_NAME in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-zoomer} -d ${POSTGRES_DB:-zoomerfume}" ]
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *logging
 
 volumes:
   qdrant_data:
