@@ -1,6 +1,6 @@
 import { Button, Group, Paper, Stack, Text } from '@mantine/core'
 import { useState } from 'react'
-import { ApiError } from '../api/client.ts'
+import { errorMessage } from '../api/client.ts'
 import type { NoteDecision, ProposedNote } from '../api/notes.ts'
 
 interface PendingNoteCardProps {
@@ -33,9 +33,7 @@ export function PendingNoteCard({ note, onDecide }: PendingNoteCardProps) {
       await onDecide(note.id, decision)
     } catch (error) {
       setError(
-        error instanceof ApiError && error.code
-          ? error.message
-          : "Couldn't store your choice. Please try again.",
+        errorMessage(error, "Couldn't store your choice. Please try again."),
       )
     } finally {
       setDeciding(null)

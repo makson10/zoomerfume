@@ -61,7 +61,7 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
   - `src/App.tsx`: picks the page: a loader, the sign-in chat or the chat page
   - `src/api/`: the fetch wrapper (`client.ts`), the server-sent event reader (`sse.ts`), the API types generated from `backend/openapi.json` (`schema.d.ts`, never edited by hand) and one module per API area (`auth.ts`, `conversations.ts`, `chat.ts`, `records.ts`, `tools.ts`, `notes.ts`)
   - `src/components/`: `ChatPage` (navbar, chat and notes aside), `SignInFlow`, `ConversationList`, `ChatPanel` (message list + composer), `Header`, `MessageList`, `MessageBubble`, `MarkdownText`, `CitationChip`, `StepLog`, `CostBadge`, `RecordDrawer`, `ToolsModal`, `NotesPanel`, `PendingNoteCard`, `ModeBadge`, `Composer`
-  - `src/hooks/`: `useSession` (the signed-in user) and `useChat` (conversations, the open chat and the streaming reply)
+  - `src/hooks/`: `useSession` (the signed-in user), `useChat` (conversations, the open chat and the streaming reply) and `useLoad` (data a panel loads when it opens: notes, tool schemas, a record)
   - `src/theme.ts`: the Mantine theme
   - `public/logo.svg`: the logo, also used as the favicon
 - `.github/workflows/ci.yml`: the CI workflow

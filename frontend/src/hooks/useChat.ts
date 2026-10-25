@@ -6,7 +6,7 @@ import {
   type TurnStatus,
   type TurnUsage,
 } from '../api/chat.ts'
-import { ApiError } from '../api/client.ts'
+import { ApiError, errorMessage } from '../api/client.ts'
 import {
   fetchMessages,
   listConversations,
@@ -39,12 +39,6 @@ export interface ChatMessage {
 
 const FALLBACK_ERROR = "Zoomer couldn't answer right now. Please try again."
 const NO_CITATIONS: Citations = { valid: [], invalid: [], missing: false }
-
-function errorText(error: unknown): string {
-  return error instanceof ApiError && error.code
-    ? error.message
-    : FALLBACK_ERROR
-}
 
 function toChatMessage(message: StoredMessage): ChatMessage {
   return {
@@ -107,7 +101,7 @@ export function useChat() {
       },
       (error) => {
         if (ignore) return
-        setError(errorText(error))
+        setError(errorMessage(error, FALLBACK_ERROR))
         setLoading(false)
       },
     )
@@ -127,7 +121,7 @@ export function useChat() {
       const stored = await fetchMessages(id)
       setMessages(stored.map(toChatMessage))
     } catch (error) {
-      setError(errorText(error))
+      setError(errorMessage(error, FALLBACK_ERROR))
     } finally {
       setLoading(false)
     }
@@ -242,7 +236,7 @@ export function useChat() {
           ]
         }),
       )
-      if (!stopped) setError(errorText(error))
+      if (!stopped) setError(errorMessage(error, FALLBACK_ERROR))
       return !refused
     } finally {
       replyRequest.current = null
