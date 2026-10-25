@@ -9,7 +9,7 @@
 - **Backend:** Python 3.12, FastAPI, [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/), pydantic-settings, structlog, uv
 - **Models:** `gpt-6-luna` for chat (configurable); `text-embedding-3-small` for the knowledge base
 - **Data:** Postgres (async SQLAlchemy + Alembic), Qdrant (vector search)
-- **Runtime:** Docker Compose; Kubernetes (kind) planned
+- **Runtime:** Docker Compose, or Kubernetes on a local kind cluster
 - **Frontend:** React + TypeScript + Vite + Mantine, served by the same FastAPI app
 
 ## Architecture
@@ -86,6 +86,18 @@ curl localhost:8000/api/whoami    # {"hostname": "...", "version": "dev"}: the c
 ```
 
 Every response also names the container that answered in its `X-Served-By` header.
+
+## Run on Kubernetes
+
+The same image runs on a local [kind](https://kind.sigs.k8s.io/) cluster: three API replicas, Postgres and Qdrant, with the migrations and the knowledge base load as Jobs. The manifests in `k8s/` are written by hand, and the app code is the same as under Compose; only its config comes from a ConfigMap and a Secret. Requirements: Docker, kind and kubectl.
+
+```bash
+cp k8s/secrets.env.example k8s/secrets.env    # set DB_PASSWORD, OPENAI_API_KEY and SESSION_SECRET
+scripts/kind-up.sh                            # cluster, image, kubectl apply -k k8s/, wait until ready
+kubectl port-forward -n zoomerfume svc/api 8000:8000    # then open http://localhost:8000
+```
+
+How Compose maps to Kubernetes, how the stack settles without `depends_on`, where the password lives and how to see all three replicas serve traffic: [docs/k8s.md](docs/k8s.md). Five things broken on purpose, with what we expected and what happened: [docs/k8s-breakages.md](docs/k8s-breakages.md).
 
 ## Why the model can never pass a user id
 
@@ -211,7 +223,7 @@ cd backend && uv run python -m app.api.openapi      # writes backend/openapi.jso
 cd ../frontend && npm run api:types                 # writes frontend/src/api/schema.d.ts
 ```
 
-CI (GitHub Actions) runs the backend lint, format and test checks and the frontend lint, format and build checks on every pull request into `dev` and `main`, fails when either generated file is out of date, and builds the Docker image.
+CI (GitHub Actions) runs the backend lint, format and test checks and the frontend lint, format and build checks on every pull request into `dev` and `main`, fails when either generated file is out of date, builds the Docker image and validates the Kubernetes manifests (`kubeconform -strict`).
 
 ## Configuration
 
@@ -266,6 +278,10 @@ zoomerfume/
 ├── docs/architecture.md          a chat turn: streaming, Stop, tools, notes, error envelope, step cap, citations, caching and costs
 ├── docs/security.md              the prompt-injection lab: the attack, three defenses, results, modes
 ├── docs/compose.md               what Compose sets up: network, DNS, volumes, startup order, restart test
+├── docs/k8s.md                   the kind cluster: Compose to Kubernetes, startup, DNS, the password, replicas
+├── docs/k8s-breakages.md         five breakages: expected, actual, which kubectl command showed it
+├── k8s/                          Kubernetes manifests (kustomize), secrets.env.example
+├── scripts/kind-up.sh            from nothing to the stack on kind
 ├── .github/workflows/ci.yml      CI pipeline
 ├── Dockerfile
 ├── docker-compose.yml            migrate + ingest (one-off), api, postgres, qdrant

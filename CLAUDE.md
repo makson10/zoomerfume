@@ -6,7 +6,7 @@ This file gives Claude Code the project context and operating rules for the Zoom
 
 Zoomerfume is a fictional Ukrainian online perfume shop (prices in UAH). This repository is its AI shop assistant, **Zoomer**: a chat bot that recommends perfumes, compares products, answers shop questions and gives general perfume advice. The goal is a *grounded* assistant: answers about the shop must come from a knowledge base the model searches through tools, with citations, never from the model's memory.
 
-Current state: a web chat with Zoomer on top of a streaming chat API (server-sent events). Customers sign in with a phone number and keep several conversations each. Replies stream in token by token, and the customer can stop one halfway. The knowledge base (`backend/corpus/`, 97 records) is chunked, embedded and stored in Qdrant by a command-line ingest. Zoomer answers shop questions through two tools, `search_kb` and `open_record`, and cites the records it used as `[KB-042]`; general perfume questions need no tools. A third tool, `save_note`, saves notes such as a wishlist for the signed-in customer, whose id is bound in a closure, never passed by the model. The web chat shows citations as chips that open the full record, a step log and the cost under each answer, the tool schemas and a notes panel. The static system prompt is cached (an explicit breakpoint, volatile data last), every model call's tokens and cost are stored, and `/cost` prints a conversation's cost per turn. One record (KB-097) carries a prompt injection on purpose. `SECURITY_MODE=hardened`, the default, turns on three defenses against it (untrusted data wrapping, read/write separation, confirmation of every note), and `vulnerable` turns them off so the attack can be shown; a badge in the web chat shows the mode.
+Current state: a web chat with Zoomer on top of a streaming chat API (server-sent events). Customers sign in with a phone number and keep several conversations each. Replies stream in token by token, and the customer can stop one halfway. The knowledge base (`backend/corpus/`, 97 records) is chunked, embedded and stored in Qdrant by a command-line ingest. Zoomer answers shop questions through two tools, `search_kb` and `open_record`, and cites the records it used as `[KB-042]`; general perfume questions need no tools. A third tool, `save_note`, saves notes such as a wishlist for the signed-in customer, whose id is bound in a closure, never passed by the model. The web chat shows citations as chips that open the full record, a step log and the cost under each answer, the tool schemas and a notes panel. The static system prompt is cached (an explicit breakpoint, volatile data last), every model call's tokens and cost are stored, and `/cost` prints a conversation's cost per turn. One record (KB-097) carries a prompt injection on purpose. `SECURITY_MODE=hardened`, the default, turns on three defenses against it (untrusted data wrapping, read/write separation, confirmation of every note), and `vulnerable` turns them off so the attack can be shown; a badge in the web chat shows the mode. The stack runs under Docker Compose or on a local kind cluster (`k8s/`, `scripts/kind-up.sh`) with three API replicas, from the same image and the same app code.
 
 The repository root is a single git repo. Backend code lives in `backend/` and the web chat in `frontend/`; Docker files, `.env.example` and docs live at the root.
 
@@ -69,6 +69,10 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
 - `docs/architecture.md`: a chat turn: streaming, Stop and the one-running-turn lock, tools, notes and the bound user id, the error envelope, the step cap, citations and what is stored
 - `docs/security.md`: the prompt-injection lab: the poisoned record, the three defenses, the eval results and switching modes
 - `docs/compose.md`: what Compose sets up: the network, DNS, volumes, config, startup order, the image tag, the restart test and `down` vs `down -v`
+- `docs/k8s.md`: the kind cluster: how to run it, Compose → Kubernetes, how one apply settles without `depends_on`, Service DNS, where the password lives, who recreates a deleted pod, the three-replica proof
+- `docs/k8s-breakages.md`: five breakages with the expected result (committed before the run), the actual result, the `kubectl` command that showed it and the fix
+- `k8s/`: hand-written Kubernetes manifests bundled by kustomize (`kustomization.yaml`: namespace `zoomerfume`, the `app-secrets` Secret generated from the git-ignored `secrets.env`, the app image tag): `namespace.yaml`, `configmap.yaml` (`app-config`), `postgres/` and `qdrant/` (Deployment, PersistentVolumeClaim, ClusterIP Service), `jobs/` (`migrate`, `ingest`), `api/` (Deployment with 3 replicas, ClusterIP Service)
+- `scripts/kind-up.sh`: creates the kind cluster, builds and loads the images, applies `k8s/` and waits until the API is ready
 - Root: `Dockerfile`, `docker-compose.yml`, `docker-compose.override.yml`, `.env.example`, `README.md`
 
 ## Entry Points
@@ -114,7 +118,7 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
 - Logging: structlog on top of stdlib `logging`. JSON lines by default, colored console output when `DEBUG=true`.
 - Frontend: npm (CI and the Docker image use Node.js 22), Vite 8, React 19, TypeScript 6.0, Mantine 9, `react-markdown` with `remark-gfm`, Tabler icons.
 - Lint/format: ruff for the backend (line length 100, rules `E`, `F`, `I`, `UP`); oxlint and Prettier for the frontend (no semicolons, single quotes).
-- Runtime environment: Docker Compose with `postgres` (17.11), `qdrant` (v1.19.1) and the app image `zoomerfume:<APP_VERSION>`, which runs the one-off `migrate` and `ingest` and then `api`.
+- Runtime environment: Docker Compose with `postgres` (17.11), `qdrant` (v1.19.1) and the app image `zoomerfume:<APP_VERSION>`, which runs the one-off `migrate` and `ingest` and then `api`. The same image runs on a local kind cluster (kind v0.33, Kubernetes 1.37) from the manifests in `k8s/`.
 
 ## Architecture Notes
 
@@ -170,7 +174,7 @@ Unit tests live in `backend/tests/` and run with pytest (`asyncio_mode = "auto"`
 
 Keep tests few and focused: the happy path plus the errors that matter. Replace external services with fakes at the boundary instead of starting them. The frontend has no test suite; it is checked by lint, formatting and the type-checked build.
 
-CI (`.github/workflows/ci.yml`) runs on pull requests and pushes to `dev` and `main`. Job `backend` runs `uv sync --frozen`, `ruff check`, `ruff format --check` and `pytest` in `backend/`, then regenerates `openapi.json` and fails if it changed. Job `frontend` runs `npm ci`, `npm run lint`, `npm run format:check`, regenerates `src/api/schema.d.ts` from `backend/openapi.json` (failing if it changed) and runs `npm run build` in `frontend/`. Job `docker` builds the image with Buildx and caches its layers in the GitHub Actions cache. It pulls Docker Hub base images through the `mirror.gcr.io` mirror, because Docker Hub rate-limits anonymous pulls from shared runner IPs (429); BuildKit falls back to Docker Hub if the mirror fails.
+CI (`.github/workflows/ci.yml`) runs on pull requests and pushes to `dev` and `main`. Job `backend` runs `uv sync --frozen`, `ruff check`, `ruff format --check` and `pytest` in `backend/`, then regenerates `openapi.json` and fails if it changed. Job `frontend` runs `npm ci`, `npm run lint`, `npm run format:check`, regenerates `src/api/schema.d.ts` from `backend/openapi.json` (failing if it changed) and runs `npm run build` in `frontend/`. Job `k8s` renders `k8s/` with `kubectl kustomize` (with `secrets.env.example` copied to `secrets.env`) and validates it with `kubeconform -strict` against the Kubernetes 1.37 schemas, the version kind runs. Job `docker` builds the image with Buildx and caches its layers in the GitHub Actions cache. It pulls Docker Hub base images through the `mirror.gcr.io` mirror, because Docker Hub rate-limits anonymous pulls from shared runner IPs (429); BuildKit falls back to Docker Hub if the mirror fails.
 
 ## Configuration
 
@@ -185,6 +189,8 @@ The app reads environment variables only, through `app/core/config.py`. For loca
 - The knowledge base settings are `QDRANT_COLLECTION` (`kb_chunks`), `CORPUS_DIR` (`corpus`, relative to the working directory: `backend/` on the host, `/app` in the image), `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS`. Changing the model or dimensions needs a new collection.
 - `SECURITY_MODE` is `hardened` (default) or `vulnerable`. `HARDEN_UNTRUSTED_WRAP`, `HARDEN_RW_SEPARATION` and `HARDEN_CONFIRM_NOTES` (`true`/`false`, unset follows the mode) turn one defense on or off. The mode is read at startup, so a switch needs a restart and, for a clean demo, a new chat.
 - After editing `.env`, recreate the container with `docker compose up -d api`. `docker compose restart` reuses the old container config and does not re-read `.env`.
+
+On Kubernetes the same settings come from the ConfigMap `app-config` (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `QDRANT_URL`, `SECURITY_MODE`; everything else keeps the app's default) and the Secret `app-secrets` (`DB_PASSWORD`, `OPENAI_API_KEY`, `SESSION_SECRET`, generated from the git-ignored `k8s/secrets.env`), both through `envFrom`. The Postgres pod reads `POSTGRES_USER`, `POSTGRES_DB` and `POSTGRES_PASSWORD` from the same keys. The image tag is set once, in `images:` in `k8s/kustomization.yaml`; `kind-up.sh` builds the image with that tag as its `APP_VERSION`. Environment variables are read when a container starts, so after changing either one run `kubectl apply -k k8s/` and `kubectl rollout restart -n zoomerfume deployment/api`.
 
 The frontend has no configuration of its own. It calls the API on the same origin.
 
@@ -297,6 +303,20 @@ npm install <package>              # updates package.json and package-lock.json
 
 `/docs` (Swagger UI) is available only when `DEBUG=true`. `/openapi.json` is always available.
 
+Kubernetes (Docker, kind and kubectl; stop the Compose `api` first if it holds port 8000):
+
+```bash
+cp k8s/secrets.env.example k8s/secrets.env   # or grep -E '^(DB_PASSWORD|OPENAI_API_KEY|SESSION_SECRET)=' .env > k8s/secrets.env
+scripts/kind-up.sh                            # about a minute from an empty cluster
+kubectl port-forward -n zoomerfume svc/api 8000:8000
+kubectl -n zoomerfume get deploy,pods,jobs,svc
+kubectl -n zoomerfume exec deploy/api -- python -c 'import urllib.request
+for _ in range(12): print(urllib.request.urlopen("http://api:8000/api/whoami").read().decode())'   # all three pod names
+kubectl -n zoomerfume exec deploy/postgres -- sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select * from notes"'
+kubectl kustomize k8s/ | kubeconform -strict -summary -kubernetes-version 1.37.0   # what CI runs
+kind delete cluster --name zoomerfume        # everything, the data included
+```
+
 If the user asks Claude to run the project, the API or the full stack, Claude should start the required processes in its own background terminal when possible. Do not stop at listing commands. Report the command, working directory, URL/port, and any missing dependency or config that prevents startup: Docker not running, no `OPENAI_API_KEY`, a port already in use, and so on.
 
 ## Notes
@@ -312,4 +332,7 @@ If the user asks Claude to run the project, the API or the full stack, Claude sh
 - Every chat check calls OpenAI and costs a little. Keep manual checks short.
 - After changing the chunking or the embedding model, run ingest with `--force`: the file hashes haven't changed, so a normal run would skip every record.
 - `indexed_vectors_count` equals `points_count` only on a fresh collection. After any re-embed or delete it stays higher, because Qdrant vacuums only segments with at least 1,000 vectors. Search is not affected.
-- `.dockerignore` excludes only the repo docs (`README.md`, `CLAUDE.md`, `docs/`). The corpus is Markdown, so a broader `*.md` rule would ship an image with no records.
+- `.dockerignore` excludes the repo docs (`README.md`, `CLAUDE.md`, `docs/`) but no other Markdown: the corpus is Markdown, so a broader `*.md` rule would ship an image with no records. It also excludes `k8s/` (with the real `secrets.env`) and `scripts/`.
+- `kind load docker-image` fails on Docker's containerd image store (`ctr: content digest ... not found`): it exports the whole multi-platform index without the other platforms' layers. `kind-up.sh` saves only this machine's platform (`docker save --platform`) and runs `kind load image-archive` instead.
+- A Job's pod template can't be changed. The Jobs have `ttlSecondsAfterFinished: 3600`, so a finished Job deletes itself and the next `kubectl apply -k k8s/` runs it again (both are safe to repeat). Change the api image for a test with `kubectl set image deployment/api`, not in `kustomization.yaml`, because that would change the Jobs too.
+- `kubectl apply -k k8s/` always prints `secret/app-secrets configured`: kustomize line-wraps base64 values over 76 characters, the API server stores them on one line. Nothing changes; `kubectl diff -k k8s/` is empty.
