@@ -21,20 +21,16 @@ def web_client(settings: Settings, tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
-def test_serves_the_page_and_its_assets(web_client: TestClient) -> None:
+def test_serves_the_page_and_its_assets_next_to_the_json_api(web_client: TestClient) -> None:
     page = web_client.get("/")
     asset = web_client.get("/assets/app.js")
+    missing = web_client.get("/api/nope")
 
     assert page.status_code == 200
     assert page.headers["content-type"].startswith("text/html")
     assert "<title>Zoomerfume</title>" in page.text
     assert asset.status_code == 200
     assert asset.text == "console.log('zoomer')"
-
-
-def test_api_paths_stay_json(web_client: TestClient) -> None:
-    missing = web_client.get("/api/nope")
-
     assert web_client.get("/health").json() == {"status": "ok"}
     assert missing.status_code == 404
     assert missing.json() == {"detail": "Not Found"}

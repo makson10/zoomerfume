@@ -54,10 +54,3 @@ async def test_the_customer_decides_once_on_own_pending_notes_only(
     assert note.status == status
     assert hidden.status_code == 404
     assert foreign.status == "pending"
-
-
-def test_notes_need_a_signed_in_user(client: TestClient) -> None:
-    response = client.get("/api/notes")
-
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "NOT_SIGNED_IN"

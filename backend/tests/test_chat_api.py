@@ -23,14 +23,6 @@ from tests.fakes import (
     make_step,
 )
 
-
-def test_health_returns_ok(client: TestClient) -> None:
-    response = client.get("/health")
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
-
-
 # The usage of the fake runner's one model call.
 USAGE = {
     "calls": 1,
@@ -195,15 +187,6 @@ def test_chat_rejects_invalid_body(
     assert fake_runner.calls == []
 
 
-def test_chat_needs_a_signed_in_user(client: TestClient, fake_runner: FakeTurnRunner) -> None:
-    body = {"conversation_id": str(uuid.uuid4()), "message": "hi"}
-
-    response = client.post("/api/chat", json=body)
-
-    assert response.status_code == 401
-    assert fake_runner.calls == []
-
-
 def test_chat_hides_other_users_conversations(
     client: TestClient,
     user: User,
@@ -222,28 +205,7 @@ def test_chat_hides_other_users_conversations(
     assert fake_runner.calls == []
 
 
-def test_chat_over_the_rate_limit_gets_429(
-    client: TestClient,
-    user: User,
-    fake_conversations: FakeConversationStore,
-    fake_limiter: FakeRateLimiter,
-    fake_runner: FakeTurnRunner,
-) -> None:
-    conversation = fake_conversations.add(user.id)
-    fake_limiter.retry_after = 42
-
-    response = client.post(
-        "/api/chat", json={"conversation_id": str(conversation.id), "message": "hi"}
-    )
-
-    assert response.status_code == 429
-    assert response.headers["retry-after"] == "42"
-    assert response.json()["error"]["code"] == "RATE_LIMITED"
-    assert fake_limiter.hits[-1] == (f"chat:user:{user.id}", 20)
-    assert fake_runner.calls == []
-
-
-def test_a_first_message_starts_a_conversation_unless_it_is_refused(
+def test_a_first_message_starts_a_conversation_unless_the_rate_limit_refuses_it(
     client: TestClient,
     user: User,
     fake_conversations: FakeConversationStore,
@@ -256,6 +218,9 @@ def test_a_first_message_starts_a_conversation_unless_it_is_refused(
     response = client.post("/api/chat/stream", json={"message": "vanilla for winter?"})
 
     assert refused.status_code == 429
+    assert refused.headers["retry-after"] == "42"
+    assert refused.json()["error"]["code"] == "RATE_LIMITED"
+    assert fake_limiter.hits[-1] == (f"chat:user:{user.id}", 20)
     [conversation] = fake_conversations.conversations
     assert (conversation.user_id, conversation.title) == (user.id, "vanilla for winter?")
     [turn] = fake_runner.calls

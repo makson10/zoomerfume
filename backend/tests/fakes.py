@@ -23,7 +23,8 @@ VULNERABLE = SecurityPolicy(untrusted_wrap=False, rw_separation=False, confirm_n
 
 class FakeTurnRunner:
     """Stands in for ``TurnRunner``: records each turn and streams a canned reply, status,
-    steps, proposed notes and model calls, then stores the turn like the real runner."""
+    steps, proposed notes and model calls, then stores the turn like the real runner.
+    ``run()`` is the real runner's own."""
 
     reply = "fake reply"
     status: TurnStatus = "ok"
