@@ -17,6 +17,7 @@ from app.services.auth import UserStore, session_user_id
 from app.services.conversations import ConversationStore
 from app.services.notes import NoteStore
 from app.services.rate_limit import RateLimiter
+from app.services.readiness import Readiness
 from app.services.turns import TurnStore
 
 
@@ -33,6 +34,11 @@ def get_knowledge_base(request: Request) -> KnowledgeBase:
 def get_note_store(request: Request) -> NoteStore:
     """Return the note store the lifespan stored on ``app.state``."""
     return request.app.state.notes
+
+
+def get_readiness(request: Request) -> Readiness:
+    """Return the readiness check the lifespan stored on ``app.state``."""
+    return request.app.state.readiness
 
 
 def get_app_settings(request: Request) -> Settings:
@@ -67,6 +73,7 @@ Conversations = Annotated[ConversationStore, Depends(get_conversation_store)]
 Knowledge = Annotated[KnowledgeBase, Depends(get_knowledge_base)]
 Limiter = Annotated[RateLimiter, Depends(get_rate_limiter)]
 Notes = Annotated[NoteStore, Depends(get_note_store)]
+ReadinessChecks = Annotated[Readiness, Depends(get_readiness)]
 Runtime = Annotated[TurnRunner, Depends(get_turn_runner)]
 Turns = Annotated[TurnStore, Depends(get_turn_store)]
 Users = Annotated[UserStore, Depends(get_user_store)]

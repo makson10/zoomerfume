@@ -12,6 +12,7 @@
           "health"
         ],
         "summary": "Health Check",
+        "description": "Liveness: the process is up and answers.\n\nIt checks nothing else, so a Postgres or Qdrant outage never gets the app restarted.",
         "operationId": "health_check_health_get",
         "responses": {
           "200": {
@@ -34,6 +35,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Readiness Check",
+        "description": "Readiness: whether this replica can serve chat.\n\nPostgres must answer, the schema must be at the newest migration and the knowledge\nbase must have points. Until all three pass, the answer is a 503.",
+        "operationId": "readiness_check_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A check failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessOut"
                 }
               }
             }
@@ -972,6 +1015,32 @@
           "phone"
         ],
         "title": "PhoneRequest"
+      },
+      "ReadinessOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "not_ready"
+            ],
+            "title": "Status"
+          },
+          "checks": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Checks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "checks"
+        ],
+        "title": "ReadinessOut",
+        "description": "Whether this replica can serve chat, and each check's result."
       },
       "RecordOut": {
         "properties": {

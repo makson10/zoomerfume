@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 from app.agent.citations import Citations
 from app.agent.context import PendingNote, Step, TurnStatus
@@ -332,3 +335,40 @@ class FakeTurnStore:
             for turn_id, calls in self.calls.items()
             if calls and self.turns[turn_id].conversation_id == conversation_id
         }
+
+
+class FakeEngine:
+    """Stands in for the readiness check's database engine. Every query answers with the
+    schema ``revision``, after ``delay_s`` seconds."""
+
+    def __init__(self, revision: str | None, delay_s: float = 0) -> None:
+        self.revision = revision
+        self.delay_s = delay_s
+
+    @asynccontextmanager
+    async def connect(self) -> AsyncIterator[FakeEngine]:
+        await asyncio.sleep(self.delay_s)
+        yield self
+
+    async def execute(self, statement: object) -> None:
+        return None
+
+    async def scalar(self, statement: object) -> str | None:
+        return self.revision
+
+
+class FakeQdrant:
+    """Stands in for the readiness check's Qdrant client: a collection with ``points``
+    points (None: no collection), or ``error`` raised on every call."""
+
+    def __init__(self, points: int | None = 0, error: Exception | None = None) -> None:
+        self.points = points
+        self.error = error
+
+    async def collection_exists(self, name: str) -> bool:
+        if self.error:
+            raise self.error
+        return self.points is not None
+
+    async def get_collection(self, name: str) -> SimpleNamespace:
+        return SimpleNamespace(points_count=self.points)
