@@ -128,7 +128,7 @@ def _section_pieces(heading: str | None, text: str, budget: int) -> list[_Piece]
 def _units(text: str, budget: int) -> list[str]:
     """Paragraphs that fit the budget, else their sentences, else token windows."""
     units: list[str] = []
-    for paragraph in (p.strip() for p in text.split("\n\n") if p.strip()):
+    for paragraph in (block.strip() for block in text.split("\n\n") if block.strip()):
         if count_tokens(paragraph) <= budget:
             units.append(paragraph)
             continue

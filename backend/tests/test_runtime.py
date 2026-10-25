@@ -12,14 +12,8 @@ from openai.types.responses.response_usage import InputTokensDetails
 from app.agent import runtime
 from app.agent.citations import Citations
 from app.agent.context import PendingNote
-from app.agent.runtime import (
-    FALLBACK_TEXT,
-    MAX_STEPS_TEXT,
-    NewTurn,
-    TurnRunner,
-    TurnStart,
-    window_history,
-)
+from app.agent.history import window_history
+from app.agent.runtime import FALLBACK_TEXT, MAX_STEPS_TEXT, NewTurn, TurnRunner, TurnStart
 from app.agent.streaming import Token, ToolCall
 from app.core.config import Settings
 from app.db.engine import create_db_engine

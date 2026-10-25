@@ -7,8 +7,8 @@ import {
   Text,
   Title,
 } from '@mantine/core'
-import { useEffect, useState } from 'react'
 import { fetchNotes, type Note, type NoteDecision } from '../api/notes.ts'
+import { useLoad } from '../hooks/useLoad.ts'
 import { PendingNoteCard } from './PendingNoteCard.tsx'
 
 const savedAt = new Intl.DateTimeFormat('en-GB', {
@@ -61,25 +61,7 @@ interface NotesPanelProps {
  * that wait for the customer's confirmation show the same card as under the reply.
  */
 export function NotesPanel({ refreshKey, onDecide }: NotesPanelProps) {
-  const [notes, setNotes] = useState<Note[] | null>(null)
-  const [error, setError] = useState(false)
-
-  useEffect(() => {
-    let ignore = false
-    fetchNotes().then(
-      (loaded) => {
-        if (ignore) return
-        setNotes(loaded)
-        setError(false)
-      },
-      () => {
-        if (!ignore) setError(true)
-      },
-    )
-    return () => {
-      ignore = true
-    }
-  }, [refreshKey])
+  const { data: notes, error } = useLoad(fetchNotes, refreshKey)
 
   return (
     <Stack h="100%" gap="sm">

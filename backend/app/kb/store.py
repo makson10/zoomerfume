@@ -13,10 +13,8 @@ from app.kb.corpus import Record
 
 # HNSW graph: 16 links per node, 100 candidates considered while building it.
 HNSW_CONFIG = models.HnswConfigDiff(m=16, ef_construct=100)
-# Qdrant builds the HNSW graph only for segments bigger than this many kilobytes of vectors
-# and searches smaller ones by brute force. The server default (10,000 kB in Qdrant 1.19) is
-# bigger than our whole corpus; one 1536-dimension vector is about 6 kB, so 10 kB indexes
-# any real segment.
+# Qdrant builds the HNSW graph only for segments over this many kB of vectors. Its default
+# (10,000 kB) is bigger than our whole corpus, and one vector is about 6 kB.
 INDEXING_THRESHOLD_KB = 10
 PAYLOAD_INDEXES = {
     "record_id": models.PayloadSchemaType.KEYWORD,
@@ -81,23 +79,25 @@ async def replace_record_chunks(
         for chunk, vector in zip(chunks, vectors, strict=True)
     ]
     await client.upsert(name, points=points, wait=True)
-    stale = models.Filter(
-        must=[
-            models.FieldCondition(key="record_id", match=models.MatchValue(value=header.id)),
-            models.FieldCondition(key="chunk_index", range=models.Range(gte=len(chunks))),
-        ]
-    )
-    await client.delete(name, points_selector=models.FilterSelector(filter=stale), wait=True)
+    stale = _record_chunks(header.id, from_index=len(chunks))
+    await client.delete(name, points_selector=stale, wait=True)
 
 
 async def delete_record_chunks(client: AsyncQdrantClient, name: str, record_id: str) -> None:
     """Delete every chunk of a record."""
-    selector = models.FilterSelector(
+    await client.delete(name, points_selector=_record_chunks(record_id), wait=True)
+
+
+def _record_chunks(record_id: str, from_index: int = 0) -> models.FilterSelector:
+    """Select a record's chunks from ``from_index`` on."""
+    return models.FilterSelector(
         filter=models.Filter(
-            must=[models.FieldCondition(key="record_id", match=models.MatchValue(value=record_id))]
+            must=[
+                models.FieldCondition(key="record_id", match=models.MatchValue(value=record_id)),
+                models.FieldCondition(key="chunk_index", range=models.Range(gte=from_index)),
+            ]
         )
     )
-    await client.delete(name, points_selector=selector, wait=True)
 
 
 async def wait_until_indexed(

@@ -27,8 +27,3 @@ def test_returns_a_record_or_404(
     assert found.json() == {**header, "header": header, "body": "## Nova Poshta\nTwo days."}
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "NOT_FOUND"
-
-
-def test_records_and_tool_schemas_need_a_signed_in_user(client: TestClient) -> None:
-    assert client.get("/api/records/KB-061").status_code == 401
-    assert client.get("/api/tools/schema").status_code == 401

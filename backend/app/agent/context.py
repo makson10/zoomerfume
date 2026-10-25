@@ -43,11 +43,9 @@ class PendingNote(BaseModel):
 
 @dataclass
 class TurnContext:
-    """Mutable context passed into ``Runner.run(..., context=ctx)``.
+    """The state of one turn, shared by the runner and the tools.
 
-    The tools reach the knowledge base and the notes through it and record their calls in
-    it. It holds no user id: ``save_note`` writes for the customer it was built for (see
-    ``build_tools``).
+    It holds no user id: ``save_note`` writes for the customer it was built for.
     """
 
     conversation_id: uuid.UUID

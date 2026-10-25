@@ -1,4 +1,4 @@
-# Rephrased questions for app.kb.eval_rephrase. Each question avoids the key words of the
+# Rephrased questions for app.eval.rephrase. Each question avoids the key words of the
 # record that answers it, so only a search by meaning can find it.
 # `expected` lists every record that fully answers the question: the target first, then
 # any FAQ or policy that covers the same thing.

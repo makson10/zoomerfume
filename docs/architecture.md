@@ -83,10 +83,10 @@ Nothing is retrieved automatically. The model decides when to look something up,
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `search_kb` | `query`, `k` (1–8, default 5), `record_type` (`product`, `policy`, `company`, `faq`, `news` or null), `max_price` (UAH or null) | `hits`: `record_id`, `title`, `type`, `chunk_index`, `section`, `updated`, `score`, `text`, `price` |
+| `search_kb` | `query`, `k` (1–8, default 5), `record_type` (`product`, `policy`, `company`, `faq`, `news` or null), `max_price` (UAH or null) | `hits`: `record_id`, `type`, `chunk_index`, `updated`, `price`, `score` and `text`, the passage with its breadcrumb (`Title › Sections`) on top |
 | `open_record` | `record_id`, e.g. `KB-042` | the record's `header` (for products: sizes, prices, availability) and its whole `body` |
 
-Both tools take the run context as their first argument and reach the knowledge base through `TurnContext.kb`, a `KnowledgeBase` (`app/kb/knowledge_base.py`) built once on the app's OpenAI, Qdrant and Postgres clients. The record drawer in the web chat reads the same `kb_records` table through `GET /api/records/{id}`. With `HARDEN_UNTRUSTED_WRAP` on (the hardened default), a passage's `text` and a record's `body` reach the model inside `<untrusted_data record="KB-…">` tags, through `TurnContext.security` (see [security.md](security.md)).
+Both tools take the run context as their first argument and reach the knowledge base through `TurnContext.kb`, a `KnowledgeBase` (`app/kb/knowledge_base.py`) built once on the app's OpenAI, Qdrant and Postgres clients. The record drawer in the web chat reads the same `kb_records` table through `GET /api/records/{id}`. With `HARDEN_UNTRUSTED_WRAP` on (the hardened default), a passage's `text` (breadcrumb included) and a record's `body` reach the model inside `<untrusted_data record="KB-…">` tags, through `TurnContext.security` (see [security.md](security.md)).
 
 ## Strict schemas
 

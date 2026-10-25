@@ -28,7 +28,7 @@ from app.kb.store import (
     replace_record_chunks,
     wait_until_indexed,
 )
-from app.services.clients import create_openai_client, create_qdrant_client
+from app.services.clients import open_clients
 from app.services.usage import CallUsage
 
 
@@ -58,19 +58,22 @@ async def ingest(
     """
     records = load_corpus(settings.corpus_dir)
     engine = create_db_engine(settings)
-    qdrant = create_qdrant_client(settings)
-    openai = create_openai_client(settings)
     collection = settings.qdrant_collection
     try:
-        async with AsyncSession(engine) as session:
+        async with open_clients(settings) as (openai, qdrant), AsyncSession(engine) as session:
             hashes = await stored_hashes(session)
-            if not dry_run and await ensure_collection(
+            new_collection = not dry_run and await ensure_collection(
                 qdrant, collection, settings.embedding_dimensions
-            ):
-                force = True
-            changed = [r for r in records if force or hashes.get(r.header.id) != r.content_hash]
-            removed = sorted(set(hashes) - {r.header.id for r in records})
-            chunked = [(r, chunk_record(r.header.title, r.body)) for r in changed]
+            )
+            changed = [
+                record
+                for record in records
+                if force or new_collection or hashes.get(record.header.id) != record.content_hash
+            ]
+            removed = sorted(set(hashes) - {record.header.id for record in records})
+            chunked = [
+                (record, chunk_record(record.header.title, record.body)) for record in changed
+            ]
             summary = IngestSummary(
                 records=len(records),
                 changed=len(changed),
@@ -104,14 +107,12 @@ async def ingest(
             await delete_records(session, removed)
             await session.commit()
 
-        info = await wait_until_indexed(qdrant, collection)
-        summary.points = info.points_count
-        summary.indexed = info.indexed_vectors_count
-        return summary
+            info = await wait_until_indexed(qdrant, collection)
     finally:
-        await openai.close()
-        await qdrant.close()
         await engine.dispose()
+    summary.points = info.points_count
+    summary.indexed = info.indexed_vectors_count
+    return summary
 
 
 def main() -> None:

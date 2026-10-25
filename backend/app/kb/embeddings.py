@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator import attrgetter
+
 from openai import AsyncOpenAI
 
 # Texts per request. The API accepts up to 2,048 inputs, but smaller batches keep one
@@ -31,6 +33,6 @@ async def embed_texts(
         response = await client.embeddings.create(
             model=model, input=texts[start : start + BATCH_SIZE], dimensions=dimensions
         )
-        vectors.extend(item.embedding for item in sorted(response.data, key=lambda d: d.index))
+        vectors.extend(item.embedding for item in sorted(response.data, key=attrgetter("index")))
         tokens += response.usage.total_tokens
     return vectors, tokens

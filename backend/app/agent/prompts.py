@@ -1,9 +1,7 @@
-"""System prompt for Zoomer.
+"""Zoomer's system prompt.
 
-It is static: the same text for every customer and every call, so it stays a cacheable
-prefix. The security mode only decides, once at startup, whether the untrusted data rules
-are part of it. The date, the time and the customer's name come in a separate note at the
-end of the input (see ``app.agent.input_filter``).
+It is the same for every customer and every call, so it stays a cacheable prefix. The time
+and the customer's name come last, in a separate note (see ``app.agent.input_filter``).
 """
 
 from __future__ import annotations

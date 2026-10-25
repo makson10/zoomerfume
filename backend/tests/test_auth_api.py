@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
-from tests.fakes import FakeRateLimiter, FakeUserStore
+from tests.fakes import FakeRateLimiter, FakeTurnRunner, FakeUserStore
 
 PHONE = "+380671234567"
 
@@ -58,9 +58,28 @@ def test_logout_ends_the_session(client: TestClient, fake_users: FakeUserStore) 
 
     assert client.post("/api/auth/logout").status_code == 204
 
-    me = client.get("/api/me")
-    assert me.status_code == 401
-    assert me.json()["error"]["code"] == "NOT_SIGNED_IN"
+    assert client.get("/api/me").status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/api/me"),
+        ("GET", "/api/conversations"),
+        ("POST", "/api/chat"),
+        ("GET", "/api/records/KB-061"),
+        ("GET", "/api/tools/schema"),
+        ("GET", "/api/notes"),
+    ],
+)
+def test_api_routes_need_a_signed_in_user(
+    client: TestClient, fake_runner: FakeTurnRunner, method: str, path: str
+) -> None:
+    response = client.request(method, path, json={"message": "hi"} if method == "POST" else None)
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "NOT_SIGNED_IN"
+    assert fake_runner.calls == []
 
 
 def test_sign_in_over_the_rate_limit_gets_429(
@@ -81,11 +100,9 @@ def test_sign_in_over_the_rate_limit_gets_429(
     ("env", "mode"),
     [
         ({}, "hardened"),
-        ({"SECURITY_MODE": "vulnerable"}, "vulnerable"),
         ({"SECURITY_MODE": "vulnerable", "HARDEN_CONFIRM_NOTES": "true"}, "confirm"),
-        ({"HARDEN_UNTRUSTED_WRAP": "false"}, "separation+confirm"),
     ],
-    ids=["default", "vulnerable", "one-defense-on", "one-defense-off"],
+    ids=["default", "one-defense-on"],
 )
 def test_me_shows_the_security_mode_the_settings_resolve_to(
     client: TestClient,

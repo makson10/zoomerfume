@@ -83,12 +83,8 @@ class NoteStore:
             )
 
     async def proposals(self, conversation_id: uuid.UUID) -> list[Note]:
-        """Return the notes in the conversation that waited for the customer, the oldest
-        first.
-
-        They are the pending ones and the decided ones. A note saved straight away was never
-        decided, so it isn't one of them.
-        """
+        """Return the conversation's notes that waited for the customer, pending or decided,
+        the oldest first."""
         async with self._sessionmaker() as session:
             result = await session.scalars(
                 select(Note)

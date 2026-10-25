@@ -119,7 +119,7 @@ python -m app.kb.search "vanilla and tobacco" --type product --max-price 3000 -k
 
 A search that only matches words isn't enough: customers rarely use the words a record uses. `backend/eval/rephrase.yaml` holds 20 questions written to avoid the key words of the record that answers them ("can my sister in Warsaw get an order?" for the international shipping policy, which lists Poland but never mentions Warsaw). `expected` lists every record that fully answers the question: the target first, then any FAQ or policy that covers the same rule. The list was fixed before the first run.
 
-`python -m app.kb.eval_rephrase` searches each question (`k=5` chunks) and reports the rank of the first expected record among the records found. Target: hit@5 of at least 90%.
+`python -m app.eval.rephrase` searches each question (`k=5` chunks) and reports the rank of the first expected record among the records found. Target: hit@5 of at least 90%.
 
 | # | Question | Expected | Rank | Top hit |
 |---|---|---|---|---|

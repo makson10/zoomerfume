@@ -14,6 +14,11 @@ export class ApiError extends Error {
   }
 }
 
+/** The API's message for an error with a code, or `fallback` for any other failure. */
+export function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof ApiError && error.code ? error.message : fallback
+}
+
 async function toApiError(response: Response): Promise<ApiError> {
   const body = (await response
     .json()

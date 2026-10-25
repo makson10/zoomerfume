@@ -23,17 +23,18 @@ function resultColor(step: Step): string | undefined {
   return step.code === 'CONFIRMATION_REQUIRED' ? 'orange' : 'red'
 }
 
-function StepRow({ step }: { step: Step }) {
-  let result: string
-  if (!step.success) result = step.code ?? 'failed'
-  else if (step.record_ids.length > 0) result = step.record_ids.join(', ')
-  else result = 'nothing found'
+function resultText(step: Step): string {
+  if (!step.success) return step.code ?? 'failed'
+  if (step.record_ids.length > 0) return step.record_ids.join(', ')
+  return step.tool === 'save_note' ? 'saved' : 'nothing found'
+}
 
+function StepRow({ step }: { step: Step }) {
   return (
     <Text size="xs">
       {step.step}. <Code>{step.tool}</Code>({formatArgs(step.args)}) →{' '}
       <Text span inherit c={resultColor(step)}>
-        {result}
+        {resultText(step)}
       </Text>{' '}
       <Text span inherit c="dimmed">
         · {step.duration_ms} ms
@@ -42,7 +43,8 @@ function StepRow({ step }: { step: Step }) {
   )
 }
 
-function Notes({
+/** "Stopped" for an answer the customer stopped, and any citation problems. */
+function AnswerFlags({
   citations,
   stopped,
 }: {
@@ -83,7 +85,7 @@ export function StepLog({ steps, citations, stopped = false }: StepLogProps) {
         <Text size="xs" c="dimmed">
           No tools used
         </Text>
-        <Notes citations={citations} stopped={stopped} />
+        <AnswerFlags citations={citations} stopped={stopped} />
       </Stack>
     )
   }
@@ -108,7 +110,7 @@ export function StepLog({ steps, citations, stopped = false }: StepLogProps) {
           ))}
         </Stack>
       </Collapse>
-      <Notes citations={citations} stopped={stopped} />
+      <AnswerFlags citations={citations} stopped={stopped} />
     </Stack>
   )
 }

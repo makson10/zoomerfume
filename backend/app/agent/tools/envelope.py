@@ -56,9 +56,8 @@ class ToolResult:
 def tool_guard(tool: Callable[..., Awaitable[ToolResult]]) -> Callable[..., Awaitable[str]]:
     """Turn a tool's result or error into the JSON envelope and record the call as a step.
 
-    The tool returns a :class:`ToolResult` or raises :class:`ToolError`. Any other
-    exception becomes ``UPSTREAM_ERROR`` with a fixed message, so nothing escapes to the
-    agent loop.
+    Any exception other than :class:`ToolError` becomes ``UPSTREAM_ERROR`` with a fixed
+    message, so nothing escapes to the agent loop.
     """
     signature = inspect.signature(tool)
     arg_names = list(signature.parameters)[1:]
