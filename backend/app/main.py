@@ -1,12 +1,4 @@
-"""
-Application entry point: :func:`create_app` builds the FastAPI app.
-
-Lifespan events:
-  startup  → create the clients, the database engine, the session factory, the
-             knowledge base, the note store and the turn runner; verify Postgres /
-             Qdrant connectivity
-  shutdown → close the clients and dispose the database engine
-"""
+"""Application entry point: :func:`create_app` builds the FastAPI app."""
 
 from __future__ import annotations
 
@@ -16,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from agents import set_default_openai_client
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -23,7 +16,7 @@ from app.agent.runtime import TurnRunner
 from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
-from app.api.errors import ERROR_RESPONSES, ApiError, api_error_handler
+from app.api.errors import ERROR_RESPONSES, ApiError, api_error_handler, validation_error_handler
 from app.api.health import router as health_router
 from app.api.notes import router as notes_router
 from app.api.records import router as records_router
@@ -42,24 +35,19 @@ logger = logging.getLogger(__name__)
 SESSION_MAX_AGE_S = 30 * 24 * 60 * 60
 
 
-# ── Lifespan ──────────────────────────────────────────────────────────────────
-
-
-async def _safe(coro: Awaitable[object], *, success: str, failure: str) -> None:
-    """Await one shutdown step, logging success/failure and swallowing errors."""
+async def _close_quietly(name: str, closing: Awaitable[object]) -> None:
+    """Await one shutdown step. A failure is only logged, so the other steps still run."""
     try:
-        await coro
-        logger.info(success)
+        await closing
+        logger.info("%s closed", name)
     except Exception:
-        logger.exception(failure)
+        logger.exception("Failed to close the %s", name)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Create the clients, the engine and the objects built on them; close them on shutdown."""
     settings: Settings = app.state.settings
-
-    # ── STARTUP ───────────────────────────────────────────────────────────────
     logger.info("Starting Zoomerfume API…")
 
     openai_client = create_openai_client(settings)
@@ -67,56 +55,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     engine = create_db_engine(settings)
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     set_default_openai_client(openai_client)
-    kb = KnowledgeBase(settings, qdrant_client, openai_client, sessionmaker)
+    knowledge_base = KnowledgeBase(settings, qdrant_client, openai_client, sessionmaker)
     notes = NoteStore(sessionmaker)
     app.state.sessionmaker = sessionmaker
-    app.state.kb = kb
+    app.state.kb = knowledge_base
     app.state.notes = notes
-    app.state.turn_runner = TurnRunner(settings, engine, kb, notes)
+    app.state.turn_runner = TurnRunner(settings, engine, knowledge_base, notes)
 
-    # 1. Verify Postgres connectivity. Users and conversations live there, so
-    #    the API can't serve signed-in requests until it is reachable.
     if await ping_db(engine):
         logger.info("Postgres is reachable")
     else:
-        logger.warning("Could not reach Postgres — sign-in and chat will fail until it is back")
-
-    # 2. Verify Qdrant connectivity.
+        logger.warning("Could not reach Postgres. Sign-in and chat fail until it is back")
     try:
         await qdrant_client.get_collections()
         logger.info("Qdrant is reachable at %s", settings.qdrant_url)
     except Exception:
         logger.warning("Could not reach Qdrant at %s", settings.qdrant_url)
-
     logger.info("Zoomerfume API is ready")
 
-    yield  # ── Application runs here ─────────────────────────────────────────
+    yield
 
-    # ── SHUTDOWN ──────────────────────────────────────────────────────────────
     logger.info("Shutting down Zoomerfume API…")
-
-    # Each step is independent and best-effort — a failure is logged but never
-    # blocks the rest of the teardown.
-    await _safe(
-        openai_client.close(),
-        success="OpenAI client closed",
-        failure="Failed to close the OpenAI client",
-    )
-    await _safe(
-        qdrant_client.close(),
-        success="Qdrant client closed",
-        failure="Failed to close the Qdrant client",
-    )
-    await _safe(
-        engine.dispose(),
-        success="Database engine disposed",
-        failure="Failed to dispose database engine",
-    )
-
+    await _close_quietly("OpenAI client", openai_client.close())
+    await _close_quietly("Qdrant client", qdrant_client.close())
+    await _close_quietly("database engine", engine.dispose())
     logger.info("Shutdown complete")
-
-
-# ── App ───────────────────────────────────────────────────────────────────────
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -146,22 +109,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session_cookie="zoomerfume_session",
         max_age=SESSION_MAX_AGE_S,
     )
-    from fastapi import Request, status
-    from fastapi.exceptions import RequestValidationError
-    from fastapi.responses import JSONResponse
-
-    async def validation_error_handler(
-        request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
-        return await api_error_handler(
-            request,
-            ApiError(
-                status.HTTP_422_UNPROCESSABLE_CONTENT,
-                "INVALID_REQUEST",
-                "Please check your input and try again.",
-            ),
-        )
-
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.include_router(health_router)
