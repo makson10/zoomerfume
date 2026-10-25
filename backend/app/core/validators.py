@@ -30,9 +30,8 @@ def validate_phone(raw: str, default_region: str) -> str | None:
 def validate_name(raw: str) -> str | None:
     """Return the cleaned-up name, or ``None`` if it isn't a plausible first name.
 
-    A name is 2–40 characters of letters in any script, spaces, hyphens and
-    apostrophes, with at least one letter. Runs of whitespace collapse to one space.
-    The name goes into Zoomer's instructions, so nothing else is allowed.
+    The name goes into Zoomer's instructions, so only 2–40 letters, spaces, hyphens and
+    apostrophes are allowed.
     """
     name = " ".join(unicodedata.normalize("NFC", raw).split())
     if not NAME_MIN_LENGTH <= len(name) <= NAME_MAX_LENGTH:

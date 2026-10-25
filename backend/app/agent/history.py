@@ -17,9 +17,8 @@ def window_history(
 ) -> list[TResponseInputItem]:
     """Return the last ``turns`` turns of the history, then this turn's items.
 
-    It is the run's ``session_input_callback``, so only the model input gets shorter and the
-    stored history stays whole. The cut falls where a turn starts, so a tool call always
-    keeps its output. ``turns <= 0`` turns the window off.
+    The stored history stays whole. The cut falls where a turn starts, so a tool call keeps
+    its output. ``turns <= 0`` turns the window off.
     """
     if turns <= 0:
         return history + new_items

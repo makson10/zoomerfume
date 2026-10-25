@@ -75,10 +75,8 @@ async def start_turn(
 ) -> NewTurn:
     """Start a turn for the message in one of the user's conversations, or in a new one.
 
-    A new conversation is created only here, after the sign-in and rate limit checks, so a
-    refused message leaves no empty chat behind. The reads come first and every write
-    commits, so no transaction stays open on the request's session while the turn runs.
-    The turn stores the security mode it runs with.
+    A new conversation is created only after every check passed. Every write commits, so no
+    transaction stays open while the turn runs.
 
     Raises:
         ApiError: 404 when the conversation isn't the user's, 409 while Zoomer is still
@@ -107,9 +105,7 @@ async def answer_cost_command(
 ) -> TurnDone:
     """Answer ``/cost`` with the conversation's cost report, without the model.
 
-    The command and the report go to the message log, so the transcript shows them, but
-    never to Zoomer's history. In a new chat there is nothing to count, so nothing is
-    created.
+    The report goes to the message log, never to Zoomer's history. A new chat stays uncreated.
 
     Raises:
         ApiError: 404 when the conversation isn't the user's.

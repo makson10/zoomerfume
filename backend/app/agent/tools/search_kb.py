@@ -46,11 +46,8 @@ async def search_kb(
 
 
 def _passage(hit: Hit, security: SecurityPolicy) -> dict[str, Any]:
-    """Return a hit as the model gets it.
-
-    The breadcrumb (the record title and the section headings) is record text too, so it
-    opens the passage and gets wrapped with it.
-    """
+    """Return a hit as the model gets it. The breadcrumb, the record's title and section
+    headings, is record text too, so it opens the passage and is wrapped with it."""
     passage = f"{hit.section}\n\n{hit.text}"
     return {
         "record_id": hit.record_id,

@@ -1,9 +1,4 @@
-"""OpenAI Agents SDK runtime.
-
-Owns :class:`TurnRunner`, which runs one turn: Zoomer's streamed reply to a single
-user message. Each conversation's history lives in Postgres, in an SDK
-``SQLAlchemySession``.
-"""
+"""Zoomer's turns on the OpenAI Agents SDK. Each conversation's history lives in Postgres."""
 
 from __future__ import annotations
 
@@ -91,11 +86,7 @@ class TurnResult(BaseModel):
 
 
 class TurnRunner:
-    """Runs Zoomer's turns and stores how they end.
-
-    Created once in the app lifespan and handed to routes through the
-    ``get_turn_runner`` dependency.
-    """
+    """Runs Zoomer's turns and stores how they end. The app lifespan creates one."""
 
     def __init__(
         self, settings: Settings, engine: AsyncEngine, kb: KnowledgeBase, notes: NoteStore
@@ -130,19 +121,10 @@ class TurnRunner:
     async def stream(
         self, turn: NewTurn, turns: TurnStore
     ) -> AsyncIterator[TurnStart | TurnEvent | TurnResult]:
-        """Run one turn: yield a :class:`TurnStart`, its events as they happen, then its
-        :class:`TurnResult`.
+        """Run one turn: yield a :class:`TurnStart`, the turn's events, then its result.
 
-        Any runtime error degrades to :data:`FALLBACK_TEXT`, and a run that hits
-        ``AGENT_MAX_TURNS`` ends with :data:`MAX_STEPS_TEXT`, so the chat never goes
-        silent. Only an answer that finished normally gets its citations checked,
-        because those fixed texts cite nothing. The exchange goes to the message log,
-        and the turn is stored with its status, citations, tool steps and model calls.
-
-        Closing the stream early (the customer pressed Stop or left) cancels the run.
-        The turn is stored as ``cancelled``, and the reply so far is kept in the
-        conversation's history and in the message log, so Zoomer knows what it already
-        said.
+        An error or an empty answer ends with :data:`FALLBACK_TEXT`, and the step limit with
+        :data:`MAX_STEPS_TEXT`. Closing the stream stops the turn and keeps the reply so far.
 
         Args:
             turn: The turn to run. The conversation id is also the SDK session id, so
@@ -246,10 +228,7 @@ class TurnRunner:
 
     def _run_config(self, conversation_id: uuid.UUID) -> RunConfig:
         """Build the run config: history windowing, the cache-friendly input order and a
-        ``conversation:<id>`` prompt cache key.
-
-        The cache key gives each conversation its own prompt cache.
-        """
+        prompt cache key of its own for each conversation."""
         cache_key = f"conversation:{conversation_id}"
         model_settings = ModelSettings(extra_args={"prompt_cache_key": cache_key})
         window = partial(window_history, turns=self._settings.history_window_turns)

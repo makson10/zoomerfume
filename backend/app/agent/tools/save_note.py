@@ -23,14 +23,10 @@ CONFIRMATION_MESSAGE = (
 
 
 def make_save_note(user_id: uuid.UUID) -> FunctionTool:
-    """Build ``save_note`` for one customer.
+    """Build ``save_note`` for one customer, whose id it keeps in a closure.
 
-    The tool closes over ``user_id``, so its notes always go to that customer. The id is
-    not a parameter, so the model never sees it and has no way to pass another one. With
-    ``rw_separation`` on, it refuses to write in a turn whose tools have returned knowledge
-    base records. With ``confirm_notes`` on, the note waits as ``pending`` until the
-    customer confirms or rejects it in the web chat, and the model hears that it isn't
-    saved yet.
+    The id is not a parameter, so the model never sees it and can't pass another one. The
+    turn's security policy decides whether a note is refused, pending or saved.
 
     Args:
         user_id: The signed-in customer, from the session cookie.

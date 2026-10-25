@@ -29,9 +29,8 @@ class UserStore:
     async def get_or_create(self, phone: str, name: str) -> User:
         """Return the user with this phone, creating one with ``name`` if there is none.
 
-        An existing user keeps their name, so two sign-ups with one phone end up
-        as one account. It is one upsert: on a conflict, the no-op update makes
-        Postgres return the existing row.
+        It is one upsert, so two sign-ups with one phone end up as one account. On a
+        conflict, the no-op update makes Postgres return the existing row.
         """
         stmt = insert(User).values(id=uuid.uuid4(), phone=phone, name=name)
         stmt = stmt.on_conflict_do_update(

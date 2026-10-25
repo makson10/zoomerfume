@@ -1,10 +1,5 @@
-"""Fail-open guard for message-log writes.
-
-Every public write goes through :func:`pg_guard`: it bounds the write with a short
-timeout (so a stalled/unreachable Postgres can never hang a chat turn) and
-swallows every error after logging. Recording is best-effort and may never delay
-or break a turn.
-"""
+"""Fail-open message-log writes: a slow or failed write is logged and skipped, so a database
+problem never breaks a chat turn."""
 
 from __future__ import annotations
 
@@ -16,13 +11,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Upper bound on a single write. Generous for a healthy local Postgres, tight
-# enough that an outage degrades to "skip the log" within a few seconds.
+# Plenty for a healthy Postgres, short enough that an outage only skips the log.
 WRITE_TIMEOUT_S = 5.0
 
 
 def pg_guard[T](fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T | None]]:
-    """Wrap a message-log write: bound it, never raise."""
+    """Wrap a message-log write: stop it after :data:`WRITE_TIMEOUT_S` and never raise."""
 
     @functools.wraps(fn)
     async def wrapper(*args: Any, **kwargs: Any) -> T | None:
