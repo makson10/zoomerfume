@@ -31,7 +31,7 @@ class Case(BaseModel):
 def record_rank(hits: list[Hit], expected: list[str]) -> int | None:
     """The 1-based rank of the first expected record among the hits' records, if any."""
     records = list(dict.fromkeys(hit.record_id for hit in hits))
-    return next((rank for rank, rid in enumerate(records, start=1) if rid in expected), None)
+    return next((rank for rank, record_id in enumerate(records, 1) if record_id in expected), None)
 
 
 async def _run(settings: Settings, cases: list[Case], k: int) -> list[list[Hit]]:

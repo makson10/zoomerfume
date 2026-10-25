@@ -146,7 +146,10 @@ def test_cost_command_answers_from_the_stored_calls_without_a_turn(
     assert len(fake_turns.turns) == 1
     assert len(fake_conversations.conversations) == 1
     logged = fake_conversations.transcripts[conversation.id]
-    assert [(m.role, m.kind) for m in logged] == [("user", "command"), ("assistant", "command")]
+    assert [(message.role, message.kind) for message in logged] == [
+        ("user", "command"),
+        ("assistant", "command"),
+    ]
 
 
 def test_chat_stream_ends_with_an_error_event_when_the_turn_breaks(

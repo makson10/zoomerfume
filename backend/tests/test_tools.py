@@ -211,6 +211,6 @@ def test_schema_endpoint_lists_the_tools_with_strict_schemas(
 def test_tool_schemas_are_the_same_for_every_user() -> None:
     mine, theirs = build_tools(uuid.uuid4()), build_tools(uuid.uuid4())
 
-    assert [(t.name, t.description, t.params_json_schema) for t in mine] == [
-        (t.name, t.description, t.params_json_schema) for t in theirs
+    assert [(tool.name, tool.description, tool.params_json_schema) for tool in mine] == [
+        (tool.name, tool.description, tool.params_json_schema) for tool in theirs
     ]

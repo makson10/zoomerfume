@@ -4,7 +4,9 @@ from app.kb.chunking import chunk_record, count_tokens
 
 
 def long_body() -> str:
-    sentences = " ".join(f"Sentence number {n} talks about delivery rules." for n in range(120))
+    sentences = " ".join(
+        f"Sentence number {number} talks about delivery rules." for number in range(120)
+    )
     return f"## Intro\n\nShort intro.\n\n## Delivery\n\n{sentences}\n\n## Related\n\nKB-042"
 
 

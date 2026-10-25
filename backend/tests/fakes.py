@@ -89,7 +89,9 @@ class FakeConversationStore:
         self.transcripts: dict[uuid.UUID, list[Message]] = {}
 
     async def list_for_user(self, user_id: uuid.UUID) -> list[Conversation]:
-        return [c for c in self.conversations if c.user_id == user_id]
+        return [
+            conversation for conversation in self.conversations if conversation.user_id == user_id
+        ]
 
     def add(self, user_id: uuid.UUID, title: str = "hi") -> Conversation:
         conversation = Conversation(id=uuid.uuid4(), user_id=user_id, title=title)
@@ -103,7 +105,11 @@ class FakeConversationStore:
         self, conversation_id: uuid.UUID, user_id: uuid.UUID
     ) -> Conversation | None:
         return next(
-            (c for c in self.conversations if c.id == conversation_id and c.user_id == user_id),
+            (
+                conversation
+                for conversation in self.conversations
+                if conversation.id == conversation_id and conversation.user_id == user_id
+            ),
             None,
         )
 
@@ -199,7 +205,9 @@ class FakeNoteStore:
 
     async def list_for_user(self, user_id: uuid.UUID, limit: int) -> list[Note]:
         listed = [
-            n for n in reversed(self.notes) if n.user_id == user_id and n.status != "rejected"
+            note
+            for note in reversed(self.notes)
+            if note.user_id == user_id and note.status != "rejected"
         ]
         return listed[:limit]
 
@@ -213,14 +221,16 @@ class FakeNoteStore:
         return note
 
     async def get_for_user(self, note_id: uuid.UUID, user_id: uuid.UUID) -> Note | None:
-        return next((n for n in self.notes if n.id == note_id and n.user_id == user_id), None)
+        return next(
+            (note for note in self.notes if note.id == note_id and note.user_id == user_id), None
+        )
 
     async def proposals(self, conversation_id: uuid.UUID) -> list[Note]:
         return [
-            n
-            for n in self.notes
-            if n.conversation_id == conversation_id
-            and (n.status == "pending" or n.decided_at is not None)
+            note
+            for note in self.notes
+            if note.conversation_id == conversation_id
+            and (note.status == "pending" or note.decided_at is not None)
         ]
 
 
