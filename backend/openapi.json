@@ -3,7 +3,7 @@
   "info": {
     "title": "Zoomerfume API",
     "description": "Chat API for Zoomer, the AI consultant of the Zoomerfume perfume shop.",
-    "version": "1.0.0"
+    "version": "dev"
   },
   "paths": {
     "/health": {

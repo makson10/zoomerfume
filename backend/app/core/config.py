@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     harden_confirm_notes: bool | None = None
 
     debug: bool = False
+    # The release version. The image sets it at build time from the APP_VERSION build arg.
+    app_version: str = "dev"
 
     @property
     def database_url(self) -> URL:

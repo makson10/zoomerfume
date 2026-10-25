@@ -8,8 +8,11 @@ x-logging: &logging
     max-file: "3"
 
 x-app: &app
-  build: .
-  image: zoomerfume:dev
+  build:
+    context: .
+    args:
+      APP_VERSION: ${APP_VERSION:-dev}
+  image: zoomerfume:${APP_VERSION:-dev}
   env_file:
     - .env
   logging: *logging
@@ -62,7 +65,7 @@ services:
     logging: *logging
 
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17.11-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:?set DB_USER in .env}

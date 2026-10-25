@@ -49,6 +49,11 @@ COPY --from=frontend /frontend/dist/ ./static/
 RUN chown -R appuser:appgroup /app
 USER appuser
 
+# The release version, reported by /api/whoami. Set it with
+# --build-arg APP_VERSION=1.1.0; Docker Compose passes it in.
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 EXPOSE 8000
 
 # The API server. The same image also runs the migrations and the ingest with
