@@ -51,5 +51,4 @@ async def ask(app: FastAPI, question: str) -> TurnResult:
             turns,
             app.state.settings,
         )
-        events = [event async for event in app.state.turn_runner.stream(turn, turns)]
-    return events[-1]
+        return await app.state.turn_runner.run(turn, turns)

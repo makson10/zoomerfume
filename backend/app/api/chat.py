@@ -167,8 +167,7 @@ async def chat(started: StartedReply, turns: Turns, runner: Runtime) -> TurnResu
     """
     if isinstance(started, TurnDone):
         return started
-    events = [event async for event in runner.stream(started, turns)]
-    return events[-1]
+    return await runner.run(started, turns)
 
 
 @router.post(

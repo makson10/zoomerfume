@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 from app.agent.citations import Citations
 from app.agent.context import PendingNote, Step, TurnStatus
-from app.agent.runtime import NewTurn, TurnResult, TurnStart
+from app.agent.runtime import NewTurn, TurnResult, TurnRunner, TurnStart
 from app.agent.streaming import Token, ToolCall, TurnEvent
 from app.core.security import SecurityPolicy
 from app.db.models import Conversation, KbRecord, Message, Note, ToolStep, Turn, User
@@ -34,6 +34,8 @@ class FakeTurnRunner:
         self.pending_notes: list[PendingNote] = []
         self.citations = Citations()
         self.model_calls = [CallUsage("chat", "gpt-6-luna", 2000, 1800, 100, 50)]
+
+    run = TurnRunner.run
 
     async def stream(
         self, turn: NewTurn, turns: FakeTurnStore
