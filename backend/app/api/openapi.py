@@ -19,7 +19,9 @@ SCHEMA_PATH = Path("openapi.json")
 
 def main() -> None:
     # The schema doesn't depend on the settings, so placeholders are enough.
-    settings = Settings(_env_file=None, openai_api_key="unused", session_secret="unused" * 6)
+    settings = Settings(
+        _env_file=None, openai_api_key="unused", session_secret="unused" * 6, db_password="unused"
+    )
     schema = create_app(settings).openapi()
     SCHEMA_PATH.write_text(json.dumps(schema, indent=2, ensure_ascii=False) + "\n")
     print(

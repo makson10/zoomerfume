@@ -35,6 +35,7 @@ def settings() -> Settings:
         _env_file=None,
         openai_api_key="test-key",
         session_secret="test-secret-" + "x" * 32,
+        db_password="test-password",
         message_log_enabled=False,
     )
 

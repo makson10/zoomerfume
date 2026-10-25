@@ -114,7 +114,7 @@ def test_me_shows_the_security_mode_the_settings_resolve_to(
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     client.app.state.settings = Settings(
-        _env_file=None, openai_api_key="test-key", session_secret="x" * 32
+        _env_file=None, openai_api_key="test-key", session_secret="x" * 32, db_password="x"
     )
     fake_users.add(PHONE, "Mary")
     client.post("/api/auth/phone", json={"phone": PHONE})
