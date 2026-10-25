@@ -1,6 +1,19 @@
-import { ActionIcon, AppShell, Box, Burger, Button, Text } from '@mantine/core'
+import {
+  ActionIcon,
+  AppShell,
+  Box,
+  Burger,
+  Button,
+  Text,
+  type MantineBreakpoint,
+} from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconLogout, IconNotes, IconTool } from '@tabler/icons-react'
+import {
+  IconLogout,
+  IconNotes,
+  IconTool,
+  type TablerIcon,
+} from '@tabler/icons-react'
 import { useState } from 'react'
 import type { User } from '../api/auth.ts'
 import { useChat } from '../hooks/useChat.ts'
@@ -12,6 +25,48 @@ import { NotesPanel } from './NotesPanel.tsx'
 import { RecordDrawer } from './RecordDrawer.tsx'
 import { ToolsModal } from './ToolsModal.tsx'
 
+interface HeaderButtonProps {
+  label: string
+  icon: TablerIcon
+  onClick: () => void
+  active?: boolean
+  /** Hides the button from this breakpoint on. */
+  hiddenFrom?: MantineBreakpoint
+}
+
+/** A header button with a label on wider screens and only its icon on phones. */
+function HeaderButton({
+  label,
+  icon: Icon,
+  onClick,
+  active = false,
+  hiddenFrom,
+}: HeaderButtonProps) {
+  const variant = active ? 'light' : 'default'
+  return (
+    <>
+      <Button
+        variant={variant}
+        leftSection={<Icon size={16} />}
+        onClick={onClick}
+        visibleFrom="sm"
+        hiddenFrom={hiddenFrom}
+      >
+        {label}
+      </Button>
+      <ActionIcon
+        variant={variant}
+        size="input-sm"
+        onClick={onClick}
+        hiddenFrom="sm"
+        aria-label={label}
+      >
+        <Icon size={18} />
+      </ActionIcon>
+    </>
+  )
+}
+
 interface ChatPageProps {
   user: User
   greeting: string | null
@@ -20,10 +75,7 @@ interface ChatPageProps {
 
 /**
  * The signed-in page: conversations on the left, the open chat in the middle and the
- * customer's notes on the right. Cited records open in a drawer, and the header shows
- * the security mode and the tool schemas. On smaller screens the conversations and the
- * notes fold away, and the security mode moves above the conversations, where it has
- * room.
+ * notes on the right. On smaller screens the side panels fold away.
  */
 export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
   const chat = useChat()
@@ -85,58 +137,23 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
               <Text size="sm" visibleFrom="sm">
                 {user.name}
               </Text>
-              <Button
-                variant={notesOpened ? 'light' : 'default'}
-                leftSection={<IconNotes size={16} />}
+              <HeaderButton
+                label="Notes"
+                icon={IconNotes}
                 onClick={toggleNotes}
-                visibleFrom="sm"
+                active={notesOpened}
                 hiddenFrom="md"
-              >
-                Notes
-              </Button>
-              <ActionIcon
-                variant={notesOpened ? 'light' : 'default'}
-                size="input-sm"
-                onClick={toggleNotes}
-                hiddenFrom="sm"
-                aria-label="Notes"
-              >
-                <IconNotes size={18} />
-              </ActionIcon>
-              <Button
-                variant="default"
-                leftSection={<IconTool size={16} />}
+              />
+              <HeaderButton
+                label="Tools"
+                icon={IconTool}
                 onClick={tools.open}
-                visibleFrom="sm"
-              >
-                Tools
-              </Button>
-              <ActionIcon
-                variant="default"
-                size="input-sm"
-                onClick={tools.open}
-                hiddenFrom="sm"
-                aria-label="Tools"
-              >
-                <IconTool size={18} />
-              </ActionIcon>
-              <Button
-                variant="default"
-                leftSection={<IconLogout size={16} />}
+              />
+              <HeaderButton
+                label="Log out"
+                icon={IconLogout}
                 onClick={onLogOut}
-                visibleFrom="sm"
-              >
-                Log out
-              </Button>
-              <ActionIcon
-                variant="default"
-                size="input-sm"
-                onClick={onLogOut}
-                hiddenFrom="sm"
-                aria-label="Log out"
-              >
-                <IconLogout size={18} />
-              </ActionIcon>
+              />
             </>
           }
         />

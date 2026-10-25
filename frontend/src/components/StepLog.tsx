@@ -43,7 +43,8 @@ function StepRow({ step }: { step: Step }) {
   )
 }
 
-function Notes({
+/** "Stopped" for an answer the customer stopped, and any citation problems. */
+function AnswerFlags({
   citations,
   stopped,
 }: {
@@ -84,7 +85,7 @@ export function StepLog({ steps, citations, stopped = false }: StepLogProps) {
         <Text size="xs" c="dimmed">
           No tools used
         </Text>
-        <Notes citations={citations} stopped={stopped} />
+        <AnswerFlags citations={citations} stopped={stopped} />
       </Stack>
     )
   }
@@ -109,7 +110,7 @@ export function StepLog({ steps, citations, stopped = false }: StepLogProps) {
           ))}
         </Stack>
       </Collapse>
-      <Notes citations={citations} stopped={stopped} />
+      <AnswerFlags citations={citations} stopped={stopped} />
     </Stack>
   )
 }

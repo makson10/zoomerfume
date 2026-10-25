@@ -17,11 +17,8 @@ interface MessageBubbleProps {
 }
 
 /**
- * One chat message. It is memoized: while a reply streams, only the bubble whose
- * message changed re-renders and re-parses its Markdown. A reply that hasn't
- * written anything yet shows a loader and the tool Zoomer is using. A finished reply
- * shows its step log and what its model calls cost. Notes the reply proposed show as
- * cards under it.
+ * One chat message. It is memoized, so a streamed token re-renders and re-parses only
+ * the reply it belongs to.
  */
 export const MessageBubble = memo(function MessageBubble({
   message,

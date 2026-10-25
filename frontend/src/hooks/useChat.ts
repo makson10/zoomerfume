@@ -109,16 +109,10 @@ function withNoteStatus(message: ChatMessage, note: Note): ChatMessage {
 }
 
 /**
- * The signed-in user's conversations and the open one.
+ * The user's conversations, the open chat and the reply streaming into it.
  *
- * The most recent conversation opens on load. "New chat" only clears the view;
- * the server creates the conversation when its first turn starts. Replies stream in
- * token by token. `stop()` cancels the one in progress, and so does unmounting,
- * for example on log out. A message refused before its turn starts (a rate limit,
- * for example) leaves the chat, and `send()` resolves to `false`, so the composer
- * can give the text back. A note Zoomer proposes shows under its reply until the
- * customer decides on it with `decideNote()`, from the reply or the notes panel.
- * `notesVersion` goes up each time the notes change, so the panel reloads.
+ * `send()` resolves to `false` for a refused message, so the composer gives the text
+ * back. `notesVersion` goes up when the notes change, so the notes panel reloads.
  */
 export function useChat() {
   const [conversations, setConversations] = useState<Conversation[]>([])
