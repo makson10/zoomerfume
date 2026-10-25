@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import dataclass
+from typing import get_args
 
 from openai import AsyncOpenAI
 from qdrant_client import AsyncQdrantClient, models
@@ -16,7 +17,7 @@ from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.kb.corpus import RecordType
 from app.kb.embeddings import embed_texts
-from app.services.clients import create_openai_client, create_qdrant_client
+from app.services.clients import open_clients
 
 
 @dataclass(frozen=True)
@@ -107,23 +108,18 @@ async def search(
 
 
 async def _run(settings: Settings, args: argparse.Namespace) -> list[Hit]:
-    qdrant = create_qdrant_client(settings)
-    openai = create_openai_client(settings)
-    try:
+    async with open_clients(settings) as (openai, qdrant):
         hits, _ = await search(
             qdrant, openai, settings, args.query, args.k, args.type, args.max_price
         )
-        return hits
-    finally:
-        await openai.close()
-        await qdrant.close()
+    return hits
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Search the knowledge base.")
     parser.add_argument("query")
     parser.add_argument("-k", type=int, default=5, help="number of chunks (default 5)")
-    parser.add_argument("--type", choices=["product", "policy", "company", "faq", "news"])
+    parser.add_argument("--type", choices=get_args(RecordType))
     parser.add_argument("--max-price", type=int, help="products up to this price, in UAH")
     args = parser.parse_args()
     settings = get_settings()

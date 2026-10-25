@@ -1,4 +1,5 @@
 import { Container, ScrollArea } from '@mantine/core'
+import type { NoteDecision } from '../api/notes.ts'
 import type { ChatMessage } from '../hooks/useChat.ts'
 import { Composer } from './Composer.tsx'
 import { MessageList } from './MessageList.tsx'
@@ -15,6 +16,8 @@ interface ChatPanelProps {
   onStop?: () => void
   /** Opens a cited record. Without it, citations stay plain text. */
   onOpenRecord?: (recordId: string) => void
+  /** Confirms or rejects a note a reply proposed. */
+  onDecideNote?: (id: string, decision: NoteDecision) => Promise<void>
 }
 
 /** The message list with the composer under it. Sending is blocked while loading or streaming. */
@@ -28,6 +31,7 @@ export function ChatPanel({
   onSend,
   onStop,
   onOpenRecord,
+  onDecideNote,
 }: ChatPanelProps) {
   return (
     <Container
@@ -42,6 +46,7 @@ export function ChatPanel({
           error={error}
           emptyText={emptyText}
           onOpenRecord={onOpenRecord}
+          onDecideNote={onDecideNote}
         />
       </ScrollArea>
       <Composer

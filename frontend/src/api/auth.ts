@@ -4,10 +4,14 @@ import type {
   KnownPhone,
   NewPhone,
   PhoneRequest,
+  SecurityPolicy,
   SignInResponse,
   UserOut,
 } from './schema.d.ts'
 
+export type { SecurityPolicy }
+
+/** The signed-in user, with the security mode the server runs in. */
 export type User = UserOut
 
 /** `known` signs the user in; `need_name` asks for a name next. */

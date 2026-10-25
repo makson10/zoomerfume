@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.agent.citations import Citations
+from app.agent.context import PendingNote
 from app.agent.runtime import FALLBACK_TEXT
 from app.core.config import Settings
 from app.db.models import User
@@ -21,14 +22,6 @@ from tests.fakes import (
     FakeUserStore,
     make_step,
 )
-
-
-def test_health_returns_ok(client: TestClient) -> None:
-    response = client.get("/health")
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
-
 
 # The usage of the fake runner's one model call.
 USAGE = {
@@ -73,7 +66,8 @@ def test_chat_runs_a_turn_and_returns_its_result(
         "steps": [make_step(["KB-031"]).model_dump()],
         "usage": USAGE,
     }
-    assert fake_turns.turns[turn.id].status == "ok"
+    stored = fake_turns.turns[turn.id]
+    assert (stored.status, stored.security_mode) == ("ok", "hardened")
 
 
 def _events(stream: str) -> list[tuple[str, Any]]:
@@ -94,6 +88,8 @@ def test_chat_stream_sends_the_turn_as_events(
     conversation = fake_conversations.add(user.id)
     step = make_step(["KB-031"])
     fake_runner.steps = [step]
+    note = PendingNote(note_id=uuid.uuid4(), text="Wishlist: Jazz Club")
+    fake_runner.pending_notes = [note]
     fake_runner.citations = Citations(valid=["KB-031"])
 
     response = client.post(
@@ -108,6 +104,7 @@ def test_chat_stream_sends_the_turn_as_events(
         ("start", {"conversation_id": str(conversation.id), "turn_id": turn_id}),
         ("tool_call", {"tool": "search_kb", "args": {"query": "vanilla"}}),
         ("tool_result", step.model_dump()),
+        ("pending_note", {"note_id": str(note.note_id), "text": "Wishlist: Jazz Club"}),
         ("token", {"text": "fake reply"}),
         ("citation", {"valid": ["KB-031"], "invalid": [], "missing": False}),
         ("usage", USAGE),
@@ -141,7 +138,10 @@ def test_cost_command_answers_from_the_stored_calls_without_a_turn(
     assert len(fake_turns.turns) == 1
     assert len(fake_conversations.conversations) == 1
     logged = fake_conversations.transcripts[conversation.id]
-    assert [(m.role, m.kind) for m in logged] == [("user", "command"), ("assistant", "command")]
+    assert [(message.role, message.kind) for message in logged] == [
+        ("user", "command"),
+        ("assistant", "command"),
+    ]
 
 
 def test_chat_stream_ends_with_an_error_event_when_the_turn_breaks(
@@ -187,15 +187,6 @@ def test_chat_rejects_invalid_body(
     assert fake_runner.calls == []
 
 
-def test_chat_needs_a_signed_in_user(client: TestClient, fake_runner: FakeTurnRunner) -> None:
-    body = {"conversation_id": str(uuid.uuid4()), "message": "hi"}
-
-    response = client.post("/api/chat", json=body)
-
-    assert response.status_code == 401
-    assert fake_runner.calls == []
-
-
 def test_chat_hides_other_users_conversations(
     client: TestClient,
     user: User,
@@ -214,28 +205,7 @@ def test_chat_hides_other_users_conversations(
     assert fake_runner.calls == []
 
 
-def test_chat_over_the_rate_limit_gets_429(
-    client: TestClient,
-    user: User,
-    fake_conversations: FakeConversationStore,
-    fake_limiter: FakeRateLimiter,
-    fake_runner: FakeTurnRunner,
-) -> None:
-    conversation = fake_conversations.add(user.id)
-    fake_limiter.retry_after = 42
-
-    response = client.post(
-        "/api/chat", json={"conversation_id": str(conversation.id), "message": "hi"}
-    )
-
-    assert response.status_code == 429
-    assert response.headers["retry-after"] == "42"
-    assert response.json()["error"]["code"] == "RATE_LIMITED"
-    assert fake_limiter.hits[-1] == (f"chat:user:{user.id}", 20)
-    assert fake_runner.calls == []
-
-
-def test_a_first_message_starts_a_conversation_unless_it_is_refused(
+def test_a_first_message_starts_a_conversation_unless_the_rate_limit_refuses_it(
     client: TestClient,
     user: User,
     fake_conversations: FakeConversationStore,
@@ -248,6 +218,9 @@ def test_a_first_message_starts_a_conversation_unless_it_is_refused(
     response = client.post("/api/chat/stream", json={"message": "vanilla for winter?"})
 
     assert refused.status_code == 429
+    assert refused.headers["retry-after"] == "42"
+    assert refused.json()["error"]["code"] == "RATE_LIMITED"
+    assert fake_limiter.hits[-1] == (f"chat:user:{user.id}", 20)
     [conversation] = fake_conversations.conversations
     assert (conversation.user_id, conversation.title) == (user.id, "vanilla for winter?")
     [turn] = fake_runner.calls

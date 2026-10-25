@@ -1,6 +1,6 @@
 """Check that rephrased questions still find the record that answers them.
 
-    python -m app.kb.eval_rephrase [--file eval/rephrase.yaml] [-k 5]
+    python -m app.eval.rephrase [--file eval/rephrase.yaml] [-k 5]
 
 Prints a Markdown table with the rank of the first expected record for every question,
 then hit@1 and hit@k. Needs Qdrant with an ingested corpus and the OpenAI API.
@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.kb.search import Hit, search
-from app.services.clients import create_openai_client, create_qdrant_client
+from app.services.clients import open_clients
 
 
 class Case(BaseModel):
@@ -31,17 +31,12 @@ class Case(BaseModel):
 def record_rank(hits: list[Hit], expected: list[str]) -> int | None:
     """The 1-based rank of the first expected record among the hits' records, if any."""
     records = list(dict.fromkeys(hit.record_id for hit in hits))
-    return next((rank for rank, rid in enumerate(records, start=1) if rid in expected), None)
+    return next((rank for rank, record_id in enumerate(records, 1) if record_id in expected), None)
 
 
 async def _run(settings: Settings, cases: list[Case], k: int) -> list[list[Hit]]:
-    qdrant = create_qdrant_client(settings)
-    openai = create_openai_client(settings)
-    try:
+    async with open_clients(settings) as (openai, qdrant):
         return [(await search(qdrant, openai, settings, case.question, k))[0] for case in cases]
-    finally:
-        await openai.close()
-        await qdrant.close()
 
 
 def main() -> None:

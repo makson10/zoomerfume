@@ -1,18 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   streamMessage,
+  type ChatEvent,
   type Citations,
   type Step,
   type TurnStatus,
   type TurnUsage,
 } from '../api/chat.ts'
-import { ApiError } from '../api/client.ts'
+import { ApiError, errorMessage } from '../api/client.ts'
 import {
   fetchMessages,
   listConversations,
   type Conversation,
   type StoredMessage,
 } from '../api/conversations.ts'
+import {
+  decideNote as postDecision,
+  type Note,
+  type NoteDecision,
+  type ProposedNote,
+} from '../api/notes.ts'
 
 export interface ChatMessage {
   id: string
@@ -27,16 +34,12 @@ export interface ChatMessage {
   steps?: Step[]
   /** What the reply's model calls cost. */
   usage?: TurnUsage | null
+  /** Notes the reply proposed for the customer to confirm. */
+  notes?: ProposedNote[]
 }
 
 const FALLBACK_ERROR = "Zoomer couldn't answer right now. Please try again."
 const NO_CITATIONS: Citations = { valid: [], invalid: [], missing: false }
-
-function errorText(error: unknown): string {
-  return error instanceof ApiError && error.code
-    ? error.message
-    : FALLBACK_ERROR
-}
 
 function toChatMessage(message: StoredMessage): ChatMessage {
   return {
@@ -47,18 +50,69 @@ function toChatMessage(message: StoredMessage): ChatMessage {
     citations: message.citations,
     steps: message.steps,
     usage: message.usage,
+    notes: message.notes,
+  }
+}
+
+type ReplyEvent = Exclude<ChatEvent, { event: 'start' | 'error' }>
+
+/** How one stream event changes the reply that is streaming in. */
+function replyChange(
+  reply: ChatMessage,
+  chatEvent: ReplyEvent,
+): Partial<ChatMessage> {
+  switch (chatEvent.event) {
+    case 'token':
+      return { content: reply.content + chatEvent.data.text, activeTool: null }
+    case 'tool_call':
+      return { activeTool: chatEvent.data.tool }
+    case 'tool_result':
+      return {
+        steps: [...(reply.steps ?? []), chatEvent.data],
+        activeTool: null,
+      }
+    case 'pending_note': {
+      const { note_id: id, text } = chatEvent.data
+      return {
+        notes: [...(reply.notes ?? []), { id, text, status: 'pending' }],
+      }
+    }
+    case 'citation':
+      return { citations: chatEvent.data }
+    case 'usage':
+      return { usage: chatEvent.data }
+    case 'done':
+      return { content: chatEvent.data.reply, status: chatEvent.data.status }
+  }
+}
+
+/** A proposed note, or a note saved right away, changes what the notes panel shows. */
+function changesNotes(chatEvent: ReplyEvent): boolean {
+  if (chatEvent.event === 'pending_note') return true
+  return (
+    chatEvent.event === 'tool_result' &&
+    chatEvent.data.tool === 'save_note' &&
+    chatEvent.data.success
+  )
+}
+
+function withNoteStatus(message: ChatMessage, note: Note): ChatMessage {
+  if (!message.notes?.some((proposed) => proposed.id === note.id)) {
+    return message
+  }
+  return {
+    ...message,
+    notes: message.notes.map((proposed) =>
+      proposed.id === note.id ? { ...proposed, status: note.status } : proposed,
+    ),
   }
 }
 
 /**
- * The signed-in user's conversations and the open one.
+ * The user's conversations, the open chat and the reply streaming into it.
  *
- * The most recent conversation opens on load. "New chat" only clears the view;
- * the server creates the conversation when its first turn starts. Replies stream in
- * token by token. `stop()` cancels the one in progress, and so does unmounting,
- * for example on log out. A message refused before its turn starts (a rate limit,
- * for example) leaves the chat, and `send()` resolves to `false`, so the composer
- * can give the text back. `notesVersion` goes up each time Zoomer saves a note.
+ * `send()` resolves to `false` for a refused message, so the composer gives the text
+ * back. `notesVersion` goes up when the notes change, so the notes panel reloads.
  */
 export function useChat() {
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -84,7 +138,7 @@ export function useChat() {
       },
       (error) => {
         if (ignore) return
-        setError(errorText(error))
+        setError(errorMessage(error, FALLBACK_ERROR))
         setLoading(false)
       },
     )
@@ -104,7 +158,7 @@ export function useChat() {
       const stored = await fetchMessages(id)
       setMessages(stored.map(toChatMessage))
     } catch (error) {
-      setError(errorText(error))
+      setError(errorMessage(error, FALLBACK_ERROR))
     } finally {
       setLoading(false)
     }
@@ -151,39 +205,14 @@ export function useChat() {
             setActiveId(chatEvent.data.conversation_id)
             listConversations().then(setConversations, () => undefined)
             break
-          case 'token':
-            updateReply((reply) => ({
-              content: reply.content + chatEvent.data.text,
-              activeTool: null,
-            }))
-            break
-          case 'tool_call':
-            updateReply(() => ({ activeTool: chatEvent.data.tool }))
-            break
-          case 'tool_result':
-            updateReply((reply) => ({
-              steps: [...(reply.steps ?? []), chatEvent.data],
-              activeTool: null,
-            }))
-            if (chatEvent.data.tool === 'save_note' && chatEvent.data.success) {
-              setNotesVersion((version) => version + 1)
-            }
-            break
-          case 'citation':
-            updateReply(() => ({ citations: chatEvent.data }))
-            break
-          case 'usage':
-            updateReply(() => ({ usage: chatEvent.data }))
-            break
-          case 'done':
-            done = true
-            updateReply(() => ({
-              content: chatEvent.data.reply,
-              status: chatEvent.data.status,
-            }))
-            break
           case 'error':
             throw new ApiError(500, chatEvent.data.code, chatEvent.data.message)
+          default:
+            if (chatEvent.event === 'done') done = true
+            if (changesNotes(chatEvent)) {
+              setNotesVersion((version) => version + 1)
+            }
+            updateReply((reply) => replyChange(reply, chatEvent))
         }
       }
       if (!done) throw new Error('The reply stream ended early.')
@@ -206,7 +235,7 @@ export function useChat() {
           ]
         }),
       )
-      if (!stopped) setError(errorText(error))
+      if (!stopped) setError(errorMessage(error, FALLBACK_ERROR))
       return !refused
     } finally {
       replyRequest.current = null
@@ -217,6 +246,15 @@ export function useChat() {
   function stop() {
     replyRequest.current?.abort()
   }
+
+  // Stable, so the memoized message bubbles that get it don't re-render with every token.
+  const decideNote = useCallback(async (id: string, decision: NoteDecision) => {
+    const note = await postDecision(id, decision)
+    setMessages((current) =>
+      current.map((message) => withNoteStatus(message, note)),
+    )
+    setNotesVersion((version) => version + 1)
+  }, [])
 
   function newChat() {
     setActiveId(null)
@@ -236,5 +274,6 @@ export function useChat() {
     stop,
     newChat,
     openConversation,
+    decideNote,
   }
 }

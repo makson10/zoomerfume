@@ -9,27 +9,11 @@ import {
   Text,
   Title,
 } from '@mantine/core'
-import { useEffect, useState } from 'react'
-import { fetchToolSchemas, type ToolSchema } from '../api/tools.ts'
+import { fetchToolSchemas } from '../api/tools.ts'
+import { useLoad } from '../hooks/useLoad.ts'
 
 function ToolList() {
-  const [tools, setTools] = useState<ToolSchema[] | null>(null)
-  const [error, setError] = useState(false)
-
-  useEffect(() => {
-    let ignore = false
-    fetchToolSchemas().then(
-      (loaded) => {
-        if (!ignore) setTools(loaded)
-      },
-      () => {
-        if (!ignore) setError(true)
-      },
-    )
-    return () => {
-      ignore = true
-    }
-  }, [])
+  const { data: tools, error } = useLoad(fetchToolSchemas)
 
   if (error) {
     return <Alert color="red">Couldn't load the tools. Please try again.</Alert>

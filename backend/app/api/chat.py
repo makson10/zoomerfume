@@ -13,12 +13,13 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent.citations import Citations
-from app.agent.context import Step, TurnStatus
+from app.agent.context import PendingNote, Step, TurnStatus
 from app.agent.runtime import FALLBACK_TEXT, NewTurn, TurnResult, TurnStart
 from app.agent.streaming import Token, ToolCall
 from app.api.conversations import require_conversation
 from app.api.deps import AppSettings, Conversations, CurrentUser, Runtime, Turns, limit_chat
 from app.api.errors import ApiError, ErrorDetail
+from app.core.config import Settings
 from app.db.models import User
 from app.services.conversations import ConversationStore
 from app.services.cost_report import COST_COMMAND, NOTHING_YET, cost_report
@@ -51,18 +52,31 @@ class TurnDone(BaseModel):
 
 
 # The ``data`` of each stream event, in event order: start, token, tool_call, tool_result,
-# citation, usage, done, or error.
-ChatEventData = TurnStart | Token | ToolCall | Step | Citations | TurnUsage | TurnDone | ErrorDetail
+# pending_note, citation, usage, done, or error.
+ChatEventData = (
+    TurnStart
+    | Token
+    | ToolCall
+    | Step
+    | PendingNote
+    | Citations
+    | TurnUsage
+    | TurnDone
+    | ErrorDetail
+)
 
 
 async def start_turn(
-    body: ChatRequest, user: User, conversations: ConversationStore, turns: TurnStore
+    body: ChatRequest,
+    user: User,
+    conversations: ConversationStore,
+    turns: TurnStore,
+    settings: Settings,
 ) -> NewTurn:
     """Start a turn for the message in one of the user's conversations, or in a new one.
 
-    A new conversation is created only here, after the sign-in and rate limit checks, so a
-    refused message leaves no empty chat behind. The reads come first and every write
-    commits, so no transaction stays open on the request's session while the turn runs.
+    A new conversation is created only after every check passed. Every write commits, so no
+    transaction stays open while the turn runs.
 
     Raises:
         ApiError: 404 when the conversation isn't the user's, 409 while Zoomer is still
@@ -74,7 +88,7 @@ async def start_turn(
     else:
         conversation = await require_conversation(conversations, body.conversation_id, user)
         retrieved_before = await turns.retrieved_ids(conversation.id)
-    turn_id = await turns.start(conversation.id)
+    turn_id = await turns.start(conversation.id, settings.security.mode)
     if turn_id is None:
         raise ApiError(
             status.HTTP_409_CONFLICT,
@@ -91,9 +105,7 @@ async def answer_cost_command(
 ) -> TurnDone:
     """Answer ``/cost`` with the conversation's cost report, without the model.
 
-    The command and the report go to the message log, so the transcript shows them, but
-    never to Zoomer's history. In a new chat there is nothing to count, so nothing is
-    created.
+    The report goes to the message log, never to Zoomer's history. A new chat stays uncreated.
 
     Raises:
         ApiError: 404 when the conversation isn't the user's.
@@ -125,7 +137,7 @@ async def start_reply(
         return await answer_cost_command(
             body, user, conversations, turns, settings.message_log_enabled
         )
-    return await start_turn(body, user, conversations, turns)
+    return await start_turn(body, user, conversations, turns, settings)
 
 
 StartedReply = Annotated[NewTurn | TurnDone, Depends(start_reply)]
@@ -151,8 +163,7 @@ async def chat(started: StartedReply, turns: Turns, runner: Runtime) -> TurnResu
     """
     if isinstance(started, TurnDone):
         return started
-    events = [event async for event in runner.stream(started, turns)]
-    return events[-1]
+    return await runner.run(started, turns)
 
 
 @router.post(
@@ -168,7 +179,8 @@ async def chat_stream(
 
     ``start`` names the conversation and the turn, which is how the web chat learns the id
     of a new conversation. ``token`` events carry the reply as the model writes it, and each
-    tool call sends ``tool_call`` and then ``tool_result`` with its step. The stream ends
+    tool call sends ``tool_call`` and then ``tool_result`` with its step. A note that waits
+    for the customer's confirmation follows its step as ``pending_note``. The stream ends
     with ``citation``, ``usage`` (the turn's tokens and cost) and ``done``. ``done`` carries
     the stored reply, which replaces the streamed text, because the fallback and step-limit
     texts are never streamed. ``error`` ends a stream that broke. Closing the connection
@@ -196,6 +208,8 @@ async def chat_stream(
                         yield ServerSentEvent(event="tool_call", data=event)
                     case Step():
                         yield ServerSentEvent(event="tool_result", data=event)
+                    case PendingNote():
+                        yield ServerSentEvent(event="pending_note", data=event)
                     case TurnResult():
                         yield ServerSentEvent(event="citation", data=event.citations)
                         yield ServerSentEvent(event="usage", data=event.usage)

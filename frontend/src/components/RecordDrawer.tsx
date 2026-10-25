@@ -8,36 +8,21 @@ import {
   Text,
   Title,
 } from '@mantine/core'
-import { useEffect, useState } from 'react'
-import { ApiError } from '../api/client.ts'
-import { fetchRecord, type KbRecord } from '../api/records.ts'
+import { errorMessage } from '../api/client.ts'
+import { fetchRecord } from '../api/records.ts'
+import { useLoad } from '../hooks/useLoad.ts'
 import { MarkdownText } from './MarkdownText.tsx'
 
 function RecordView({ recordId }: { recordId: string }) {
-  const [record, setRecord] = useState<KbRecord | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { data: record, error } = useLoad(fetchRecord, recordId)
 
-  useEffect(() => {
-    let ignore = false
-    fetchRecord(recordId).then(
-      (loaded) => {
-        if (!ignore) setRecord(loaded)
-      },
-      (error) => {
-        if (ignore) return
-        setError(
-          error instanceof ApiError && error.code
-            ? error.message
-            : "Couldn't load this record. Please try again.",
-        )
-      },
+  if (error) {
+    return (
+      <Alert color="red">
+        {errorMessage(error, "Couldn't load this record. Please try again.")}
+      </Alert>
     )
-    return () => {
-      ignore = true
-    }
-  }, [recordId])
-
-  if (error) return <Alert color="red">{error}</Alert>
+  }
   if (!record) return <Loader type="dots" />
 
   return (

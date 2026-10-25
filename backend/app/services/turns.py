@@ -28,12 +28,17 @@ class TurnStore:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def start(self, conversation_id: uuid.UUID) -> uuid.UUID | None:
+    async def start(self, conversation_id: uuid.UUID, security_mode: str) -> uuid.UUID | None:
         """Insert a running turn and return its id, or ``None`` while another turn runs.
 
         A partial unique index allows one running turn per conversation. A running turn
         older than :data:`STALE_TURN_AFTER` is marked ``failed`` first, so a server that
         stopped mid-turn can't block the conversation.
+
+        Args:
+            conversation_id: The conversation the turn belongs to.
+            security_mode: The prompt-injection defenses the turn runs with, e.g.
+                ``hardened``.
         """
         await self._session.execute(
             update(Turn)
@@ -46,7 +51,12 @@ class TurnStore:
         )
         turn_id = await self._session.scalar(
             insert(Turn)
-            .values(id=uuid.uuid4(), conversation_id=conversation_id, status="running")
+            .values(
+                id=uuid.uuid4(),
+                conversation_id=conversation_id,
+                status="running",
+                security_mode=security_mode,
+            )
             .on_conflict_do_nothing(
                 index_elements=[Turn.conversation_id], index_where=RUNNING_TURN_INDEX_WHERE
             )

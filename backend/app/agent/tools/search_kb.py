@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
-from typing import Annotated
+from typing import Annotated, Any
 
 from agents import RunContextWrapper, function_tool
 from pydantic import Field
 
 from app.agent.context import TurnContext
 from app.agent.tools.envelope import ErrorCode, ToolError, ToolResult, tool_guard
+from app.core.security import SecurityPolicy
 from app.kb.corpus import RecordType
+from app.kb.search import Hit
 
 MAX_K = 8
 
@@ -35,9 +36,25 @@ async def search_kb(
     """
     if not query.strip():
         raise ToolError(ErrorCode.INVALID_ARGUMENT, "The query is empty.")
-    hits, usage = await ctx.context.kb.search(query, k, record_type, max_price)
-    ctx.context.calls.append(usage)
+    turn = ctx.context
+    hits, usage = await turn.kb.search(query, k, record_type, max_price)
+    turn.calls.append(usage)
     return ToolResult(
-        data={"hits": [{**asdict(hit), "score": round(hit.score, 3)} for hit in hits]},
+        data={"hits": [_passage(hit, turn.security) for hit in hits]},
         record_ids=list(dict.fromkeys(hit.record_id for hit in hits)),
     )
+
+
+def _passage(hit: Hit, security: SecurityPolicy) -> dict[str, Any]:
+    """Return a hit as the model gets it. The breadcrumb, the record's title and section
+    headings, is record text too, so it opens the passage and is wrapped with it."""
+    passage = f"{hit.section}\n\n{hit.text}"
+    return {
+        "record_id": hit.record_id,
+        "type": hit.type,
+        "chunk_index": hit.chunk_index,
+        "updated": hit.updated,
+        "price": hit.price,
+        "score": round(hit.score, 3),
+        "text": security.untrusted_text(hit.record_id, passage),
+    }

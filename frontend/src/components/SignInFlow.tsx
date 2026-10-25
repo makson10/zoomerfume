@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { createAccount, signInWithPhone, type User } from '../api/auth.ts'
-import { ApiError } from '../api/client.ts'
+import { errorMessage } from '../api/client.ts'
 import type { ChatMessage } from '../hooks/useChat.ts'
 import { ChatPanel } from './ChatPanel.tsx'
 
@@ -48,8 +48,7 @@ export function SignInFlow({ onSignedIn }: SignInFlowProps) {
         onSignedIn(result.user, result.message)
       }
     } catch (error) {
-      const message =
-        error instanceof ApiError && error.code ? error.message : FALLBACK_ERROR
+      const message = errorMessage(error, FALLBACK_ERROR)
       setMessages((current) => [...current, chatLine('assistant', message)])
     } finally {
       setLoading(false)

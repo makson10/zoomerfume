@@ -1,11 +1,7 @@
-"""Structured logging configuration (structlog + stdlib integration).
+"""Logging setup: structlog on top of stdlib logging.
 
-Dev mode  → colored, human-readable console output
-Prod mode → JSON lines (one object per log event)
-
-All existing ``logging.getLogger(__name__)`` calls are automatically
-routed through the structlog processor pipeline — no changes needed
-in individual modules.
+Every ``logging.getLogger(__name__)`` logger writes JSON lines, or colored console output
+in debug mode.
 """
 
 from __future__ import annotations
@@ -18,10 +14,7 @@ from structlog.contextvars import merge_contextvars
 
 
 def setup_logging(*, debug: bool) -> None:
-    """Configure structlog + stdlib logging integration.
-
-    Call once at application startup (before any log calls).
-    """
+    """Route stdlib logging through structlog. Call it once at startup."""
     shared_processors: list[structlog.types.Processor] = [
         merge_contextvars,
         structlog.stdlib.add_log_level,
@@ -37,7 +30,6 @@ def setup_logging(*, debug: bool) -> None:
     else:
         renderer = structlog.processors.JSONRenderer()
 
-    # Configure structlog-native loggers (structlog.get_logger())
     structlog.configure(
         processors=[
             *shared_processors,
@@ -48,7 +40,6 @@ def setup_logging(*, debug: bool) -> None:
         cache_logger_on_first_use=True,
     )
 
-    # Route ALL stdlib log records through structlog's formatting pipeline
     logging.config.dictConfig(
         {
             "version": 1,

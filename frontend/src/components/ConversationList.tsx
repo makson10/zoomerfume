@@ -18,7 +18,7 @@ export function ConversationList({
   onNewChat,
 }: ConversationListProps) {
   return (
-    <Stack h="100%" gap="xs">
+    <Stack flex={1} mih={0} gap="xs">
       <Button
         variant="default"
         leftSection={<IconPlus size={16} />}

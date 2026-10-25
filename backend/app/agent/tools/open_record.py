@@ -27,4 +27,5 @@ async def open_record(ctx: RunContextWrapper[TurnContext], record_id: str) -> To
     record = await ctx.context.kb.get_record(record_id)
     if record is None:
         raise ToolError(ErrorCode.NOT_FOUND, f"There is no record {record_id}.")
-    return ToolResult(data={"header": record.header, "body": record.body}, record_ids=[record_id])
+    body = ctx.context.security.untrusted_text(record_id, record.body)
+    return ToolResult(data={"header": record.header, "body": body}, record_ids=[record_id])

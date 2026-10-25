@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
+    from app.core.security import SecurityPolicy
     from app.kb.knowledge_base import KnowledgeBase
     from app.services.notes import NoteStore
     from app.services.usage import CallUsage
@@ -33,13 +34,18 @@ class Step(BaseModel):
     duration_ms: int
 
 
+class PendingNote(BaseModel):
+    """A note ``save_note`` proposed. It waits for the customer to confirm or reject it."""
+
+    note_id: uuid.UUID
+    text: str
+
+
 @dataclass
 class TurnContext:
-    """Mutable context passed into ``Runner.run(..., context=ctx)``.
+    """The state of one turn, shared by the runner and the tools.
 
-    The tools reach the knowledge base and the notes through it and record their calls in
-    it. It holds no user id: ``save_note`` writes for the customer it was built for (see
-    ``build_tools``).
+    It holds no user id: ``save_note`` writes for the customer it was built for.
     """
 
     conversation_id: uuid.UUID
@@ -51,12 +57,16 @@ class TurnContext:
     user_message: str
     kb: KnowledgeBase
     notes: NoteStore
+    # The prompt-injection defenses the tools apply.
+    security: SecurityPolicy
     # The time in the context note, the same for every model call of the turn.
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     # The tool calls of this turn, in the order they finished.
     steps: list[Step] = field(default_factory=list)
     # The model calls of this turn: the agent's chat calls and the searches' embeddings.
     calls: list[CallUsage] = field(default_factory=list)
+    # The notes this turn proposed, in the order they were proposed.
+    pending_notes: list[PendingNote] = field(default_factory=list)
     status: TurnStatus = "ok"
 
     @property

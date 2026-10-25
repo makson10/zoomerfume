@@ -1,4 +1,4 @@
-"""Alembic migration environment (async, single-source URL from app settings)."""
+"""Alembic migration environment. The database URL comes from the app settings."""
 
 from __future__ import annotations
 
@@ -8,19 +8,15 @@ from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-# Import the metadata and (crucially) the model module so every table is
-# registered on Base.metadata before autogenerate / upgrade runs.
-import app.db.models  # noqa: F401
 from alembic import context
 from app.core.config import get_settings
-from app.db.base import Base
+from app.db.models import Base
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# One source of truth for the DSN — never hard-coded in alembic.ini.
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 target_metadata = Base.metadata
