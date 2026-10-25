@@ -1,0 +1,13 @@
+# ClusterIP only: reachable inside the cluster as qdrant:6333, never from outside.
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+spec:
+  type: ClusterIP
+  selector:
+    app: qdrant
+  ports:
+    - name: http
+      port: 6333
+      targetPort: http

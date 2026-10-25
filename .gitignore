@@ -17,10 +17,11 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Environment (real secrets live only in .env)
+# Environment (real secrets live only in .env and k8s/secrets.env)
 .env
 .env.*
 !.env.example
+k8s/secrets.env
 
 
 # Editor
