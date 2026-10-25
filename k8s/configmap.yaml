@@ -1,0 +1,13 @@
+# Plain settings, passed to the app as environment variables. Secrets are in
+# app-secrets. Every setting not listed here keeps its default from the app.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: zoomerfume
+  DB_USER: zoomer
+  QDRANT_URL: http://qdrant:6333
+  SECURITY_MODE: hardened

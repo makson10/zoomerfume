@@ -34,12 +34,10 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy application source + the Alembic migration assets and entrypoint.
+# Copy application source + the Alembic migrations.
 COPY backend/app/ ./app/
 COPY backend/alembic/ ./alembic/
 COPY backend/alembic.ini ./alembic.ini
-COPY backend/scripts/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
 
 # The knowledge base corpus and the evaluation questions.
 COPY backend/corpus/ ./corpus/
@@ -51,15 +49,15 @@ COPY --from=frontend /frontend/dist/ ./static/
 RUN chown -R appuser:appgroup /app
 USER appuser
 
+# The release version, reported by /api/whoami. Set it with
+# --build-arg APP_VERSION=1.1.0; Docker Compose passes it in.
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 EXPOSE 8000
 
-# Liveness probe used by Docker and docker-compose healthcheck
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
-
-# The entrypoint runs `alembic upgrade head`, then execs the command below
-# (CMD here in prod; the docker-compose dev override swaps in --reload).
-ENTRYPOINT ["/app/entrypoint.sh"]
+# The API server. The same image also runs the migrations and the ingest with
+# another command, so the health check lives in docker-compose.yml, on `api` only.
 CMD ["python", "-m", "uvicorn", "--factory", "app.main:create_app", \
      "--host", "0.0.0.0", "--port", "8000", \
      "--loop", "uvloop", "--no-access-log"]

@@ -6,7 +6,7 @@ This file gives Claude Code the project context and operating rules for the Zoom
 
 Zoomerfume is a fictional Ukrainian online perfume shop (prices in UAH). This repository is its AI shop assistant, **Zoomer**: a chat bot that recommends perfumes, compares products, answers shop questions and gives general perfume advice. The goal is a *grounded* assistant: answers about the shop must come from a knowledge base the model searches through tools, with citations, never from the model's memory.
 
-Current state: a web chat with Zoomer on top of a streaming chat API (server-sent events). Customers sign in with a phone number and keep several conversations each. Replies stream in token by token, and the customer can stop one halfway. The knowledge base (`backend/corpus/`, 97 records) is chunked, embedded and stored in Qdrant by a command-line ingest. Zoomer answers shop questions through two tools, `search_kb` and `open_record`, and cites the records it used as `[KB-042]`; general perfume questions need no tools. A third tool, `save_note`, saves notes such as a wishlist for the signed-in customer, whose id is bound in a closure, never passed by the model. The web chat shows citations as chips that open the full record, a step log and the cost under each answer, the tool schemas and a notes panel. The static system prompt is cached (an explicit breakpoint, volatile data last), every model call's tokens and cost are stored, and `/cost` prints a conversation's cost per turn. One record (KB-097) carries a prompt injection on purpose. `SECURITY_MODE=hardened`, the default, turns on three defenses against it (untrusted data wrapping, read/write separation, confirmation of every note), and `vulnerable` turns them off so the attack can be shown; a badge in the web chat shows the mode.
+Current state: a web chat with Zoomer on top of a streaming chat API (server-sent events). Customers sign in with a phone number and keep several conversations each. Replies stream in token by token, and the customer can stop one halfway. The knowledge base (`backend/corpus/`, 97 records) is chunked, embedded and stored in Qdrant by a command-line ingest. Zoomer answers shop questions through two tools, `search_kb` and `open_record`, and cites the records it used as `[KB-042]`; general perfume questions need no tools. A third tool, `save_note`, saves notes such as a wishlist for the signed-in customer, whose id is bound in a closure, never passed by the model. The web chat shows citations as chips that open the full record, a step log and the cost under each answer, the tool schemas and a notes panel. The static system prompt is cached (an explicit breakpoint, volatile data last), every model call's tokens and cost are stored, and `/cost` prints a conversation's cost per turn. One record (KB-097) carries a prompt injection on purpose. `SECURITY_MODE=hardened`, the default, turns on three defenses against it (untrusted data wrapping, read/write separation, confirmation of every note), and `vulnerable` turns them off so the attack can be shown; a badge in the web chat shows the mode. The stack runs under Docker Compose or on a local kind cluster (`k8s/`, `scripts/kind-up.sh`) with three API replicas, from the same image and the same app code.
 
 The repository root is a single git repo. Backend code lives in `backend/` and the web chat in `frontend/`; Docker files, `.env.example` and docs live at the root.
 
@@ -19,6 +19,7 @@ browser ── /api/conversations/* ──────► api (app/api/conversat
 browser ── /api/records/{id} ─────────► api (app/api/records.py) ──► Postgres kb_records
 browser ── /api/tools/schema ─────────► api (app/api/tools.py): the JSON schemas of the user's tools
 browser ── /api/notes/* ──────────────► api (app/api/notes.py) ──► Postgres notes (list, confirm, reject)
+probes ─── /health, /ready, /api/whoami ► api (app/api/health.py): liveness, readiness (Postgres, migrations, Qdrant), the replica
 browser ── POST /api/chat/stream (SSE) ► api (FastAPI, app/api/chat.py); POST /api/chat: same turn, one JSON reply
                                           │
                                           ├── session cookie ──► user, rate limit, conversation owner check (or a new conversation)
@@ -31,9 +32,9 @@ browser ── POST /api/chat/stream (SSE) ► api (FastAPI, app/api/chat.py); P
                                           ├── history ───────────► Postgres  agent_sessions, agent_messages
                                           └── message log ───────► Postgres  messages table (fail-open)
 
-app startup:        ping Postgres + Qdrant (a failure is logged, never fatal)
-container startup:  alembic upgrade head, then uvicorn
-one-off ingest:     python -m app.kb.ingest ──► corpus/KB-*.md ──► chunks ──► OpenAI embeddings
+compose startup:    postgres + qdrant healthy ──► migrate (alembic upgrade head) ──► ingest ──► api (uvicorn)
+app startup:        run the readiness checks once and log the result (never fatal)
+ingest:             python -m app.kb.ingest ──► corpus/KB-*.md ──► chunks ──► OpenAI embeddings
                                                  ──► Qdrant kb_chunks + Postgres kb_records
 ```
 
@@ -42,20 +43,19 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
 ## Repository Layout
 
 - `backend/app/`: the FastAPI application
-  - `api/`: HTTP routes (`health.py`, `auth.py`, `conversations.py`, `chat.py`, `records.py`, `tools.py`, `notes.py`), route dependencies (`deps.py`), the JSON error body (`errors.py`), the web chat mount (`spa.py`) and the OpenAPI export (`openapi.py`)
+  - `api/`: HTTP routes (`health.py` with the probes and `/api/whoami`, `auth.py`, `conversations.py`, `chat.py`, `records.py`, `tools.py`, `notes.py`), route dependencies (`deps.py`), the JSON error body (`errors.py`), the web chat mount (`spa.py`) and the OpenAPI export (`openapi.py`)
   - `agent/`: Zoomer's runtime (`runtime.py`), the history window (`history.py`), the turn events and their mapping from the SDK's stream (`streaming.py`), the static system prompt (`prompts.py`), the order of each model call's input (`input_filter.py`), the usage hook (`hooks.py`), per-turn context, the citation check (`citations.py`) and the tools (`tools/`: `build_tools()`, the envelope and its guard, `search_kb`, `open_record`, `save_note`)
   - `core/`: settings, logging setup, phone and name validation (`validators.py`), the prompt-injection defenses that are on (`security.py`)
   - `db/`: SQLAlchemy engine, models, fail-open write guard, message log
   - `kb/`: the knowledge base: record parsing (`corpus.py`), chunking (`chunking.py`), embeddings, Qdrant storage (`store.py`), the `kb_records` table (`records.py`), search and record lookups for the tools and the API (`knowledge_base.py`), and the command-line tools `ingest`, `search` and `check_corpus`
   - `eval/`: the evaluation scripts: `rephrase` (retrieval), and `injection` and `unanswerable`, which run real turns in-process (`turns.py`)
-  - `middleware/`: per-request logging context
-  - `services/`: OpenAI and Qdrant client constructors (`clients.py`, with `open_clients()` for the command-line tools), users and the session cookie (`auth.py`), conversations (`conversations.py`), rate limits (`rate_limit.py`), turns, tool steps and model calls (`turns.py`), notes (`notes.py`), model prices (`pricing.py`), per-call and per-turn usage (`usage.py`), the `/cost` report (`cost_report.py`)
+  - `middleware/`: per-request logging context (`request_context.py`), the `X-Served-By` header (`served_by.py`)
+  - `services/`: OpenAI and Qdrant client constructors (`clients.py`, with `open_clients()` for the command-line tools), users and the session cookie (`auth.py`), conversations (`conversations.py`), rate limits (`rate_limit.py`), turns, tool steps and model calls (`turns.py`), notes (`notes.py`), model prices (`pricing.py`), per-call and per-turn usage (`usage.py`), the `/cost` report (`cost_report.py`), the readiness checks (`readiness.py`)
 - `backend/alembic/`: database migrations (`versions/0001_messages.py`, ...)
 - `backend/corpus/`: the knowledge base, one Markdown record per file (`KB-001.md` …)
 - `backend/eval/`: the evaluation questions: `rephrase.yaml` (retrieval), `injection.yaml` (the poisoned record's question), `unanswerable.yaml` (questions the knowledge base can't answer)
 - `backend/tests/`: pytest unit tests and test fakes
 - `backend/openapi.json`: the API's OpenAPI schema, generated by `python -m app.api.openapi`
-- `backend/scripts/entrypoint.sh`: container entrypoint
 - `backend/pyproject.toml`, `backend/uv.lock`: the uv project (Python 3.12)
 - `frontend/`: the web chat (Vite + React + TypeScript + Mantine)
   - `src/App.tsx`: picks the page: a loader, the sign-in chat or the chat page
@@ -68,14 +68,21 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
 - `docs/retrieval.md`: chunking, the HNSW index and the rephrase check results
 - `docs/architecture.md`: a chat turn: streaming, Stop and the one-running-turn lock, tools, notes and the bound user id, the error envelope, the step cap, citations and what is stored
 - `docs/security.md`: the prompt-injection lab: the poisoned record, the three defenses, the eval results and switching modes
+- `docs/compose.md`: what Compose sets up: the network, DNS, volumes, config, startup order, the image tag, the restart test and `down` vs `down -v`
+- `docs/k8s.md`: the kind cluster: how to run it, Compose → Kubernetes, how one apply settles without `depends_on`, Service DNS, where the password lives, who recreates a deleted pod, the three-replica proof
+- `docs/k8s-breakages.md`: five breakages with the expected result (committed before the run), the actual result, the `kubectl` command that showed it and the fix
+- `k8s/`: hand-written Kubernetes manifests bundled by kustomize (`kustomization.yaml`: namespace `zoomerfume`, the `app-secrets` Secret generated from the git-ignored `secrets.env`, the app image tag): `namespace.yaml`, `configmap.yaml` (`app-config`), `postgres/` and `qdrant/` (Deployment, PersistentVolumeClaim, ClusterIP Service), `jobs/` (`migrate`, `ingest`), `api/` (Deployment with 3 replicas, ClusterIP Service)
+- `scripts/kind-up.sh`: creates the kind cluster, builds and loads the images, applies `k8s/` and waits until the API is ready
 - Root: `Dockerfile`, `docker-compose.yml`, `docker-compose.override.yml`, `.env.example`, `README.md`
 
 ## Entry Points
 
 - ASGI app: the `app.main:create_app` factory. The image runs it with `uvicorn --factory` (`--loop uvloop --no-access-log`); the dev override swaps in `--reload`.
-- Container start: `backend/scripts/entrypoint.sh` runs `alembic upgrade head`, then `exec`s the command. A failed migration stops the container.
+- Containers: the image's command is uvicorn. Compose runs the same image as two one-off services first, `migrate` (`alembic upgrade head`) and then `ingest` (`python -m app.kb.ingest`), and starts `api` only after both exited with 0.
 - HTTP API:
   - `GET /health` → `{"status": "ok"}` (liveness only)
+  - `GET /ready` → `{status: "ready", checks: {postgres, migrations, qdrant}}`, each check `ok`; 503 with `status: "not_ready"` and a short reason per failed check (`unavailable`, `timeout`, `not migrated`, `at 0008, head is 0009`, `no collection`, `empty collection`)
+  - `GET /api/whoami` → `{hostname, version}`: the container that answered (the pod name in Kubernetes) and `APP_VERSION`. No sign-in. Every response carries the same hostname in `X-Served-By`
   - `POST /api/auth/phone` `{phone}` → `{status: "known", user, message}` with the session cookie, or `{status: "need_name", phone, message}`; 422 `INVALID_PHONE`
   - `POST /api/auth/create` `{phone, name}` → 201 `{user, message}` with the session cookie; 422 `INVALID_PHONE` or `INVALID_NAME`
   - `POST /api/auth/logout` → 204, the session is cleared
@@ -88,7 +95,7 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
   - `GET /api/tools/schema` → `[{name, description, parameters, strict}]`, read from the tools built for the signed-in user, the same objects the agent gets
   - `GET /api/notes` → `[{id, text, status, created_at}]`, the user's newest 100 notes, newest first; pending notes included, rejected ones left out
   - `POST /api/notes/{id}/confirm` and `/reject` → the note with its new `status`; 404 `NOT_FOUND` when the user has no such note, 409 `NOTE_DECIDED` when it was already confirmed or rejected (a note is decided once). Only the customer decides; the model has no tool for it
-  - Every `/api/*` route except `/api/auth/*` needs a signed-in user (401 otherwise). Someone else's conversation is a 404. Over a rate limit is a 429 with `Retry-After`. These errors, and every other 4XX including validation errors, have the body `{"error": {"code", "message"}}` (`ErrorBody`); the `message` is written for the customer.
+  - Every `/api/*` route except `/api/auth/*` and `/api/whoami` needs a signed-in user (401 otherwise). Someone else's conversation is a 404. Over a rate limit is a 429 with `Retry-After`. These errors, and every other 4XX including validation errors, have the body `{"error": {"code", "message"}}` (`ErrorBody`); the `message` is written for the customer.
   - `GET /openapi.json` is served in every mode. `backend/openapi.json` is the same schema, committed, and the web chat's types are generated from it
   - `/docs` and `/redoc` only when `DEBUG=true`
 - Web chat: `GET /` and the files next to it (`/assets/*`, `/logo.svg`), when the image has a frontend build. Any other path gets FastAPI's JSON 404.
@@ -111,7 +118,7 @@ The API only reads the `kb_chunks` collection, through `search_kb`. The `app.kb`
 - Logging: structlog on top of stdlib `logging`. JSON lines by default, colored console output when `DEBUG=true`.
 - Frontend: npm (CI and the Docker image use Node.js 22), Vite 8, React 19, TypeScript 6.0, Mantine 9, `react-markdown` with `remark-gfm`, Tabler icons.
 - Lint/format: ruff for the backend (line length 100, rules `E`, `F`, `I`, `UP`); oxlint and Prettier for the frontend (no semicolons, single quotes).
-- Runtime environment: Docker Compose with `api`, `postgres` and `qdrant`.
+- Runtime environment: Docker Compose with `postgres` (17.11), `qdrant` (v1.19.1) and the app image `zoomerfume:<APP_VERSION>`, which runs the one-off `migrate` and `ingest` and then `api`. The same image runs on a local kind cluster (kind v0.33, Kubernetes 1.37) from the manifests in `k8s/`.
 
 ## Architecture Notes
 
@@ -141,13 +148,13 @@ A chat turn goes through these steps:
 
 **Data access.** Routes reach Postgres through small stores (`UserStore`, `ConversationStore`, `RateLimiter`, `TurnStore`), each built per request on the `get_db` session. `TurnStore` also writes a turn's `llm_calls` rows and sums them per turn in one `GROUP BY` query (`usage_by_turn()`), which the transcript and `/cost` read. `NoteStore` is the exception: it is built once in the lifespan on the session factory, because `save_note` uses it too. Tests replace the stores, not the database.
 
-**Startup and shutdown.** `create_app(settings=None)` (`app/main.py`) loads the settings (or takes the ones passed in), sets up logging and stores the settings on `app.state`. Nothing runs at import time. After the routers it calls `mount_web_chat()` (`app/api/spa.py`), which mounts the frontend build at `/` only if `backend/static/index.html` exists (`/app/static` in the image). Without a build, as in unit tests or a backend run on the host, the app serves the API only. The lifespan creates the OpenAI and Qdrant clients and the SQLAlchemy engine, points the Agents SDK at the app's own `AsyncOpenAI` client through `set_default_openai_client`, and stores the session factory (`sessionmaker`), the `KnowledgeBase`, the `NoteStore` and one `TurnRunner` on `app.state`. It then pings Postgres and Qdrant; if either is down, it logs the error and keeps starting, and sign-in and chat fail until Postgres is back. Shutdown closes the clients and disposes the engine. `GET /health` is a liveness check that always returns `{"status": "ok"}`.
+**Startup and shutdown.** `create_app(settings=None)` (`app/main.py`) loads the settings (or takes the ones passed in), sets up logging and stores the settings on `app.state`. Nothing runs at import time. After the routers it calls `mount_web_chat()` (`app/api/spa.py`), which mounts the frontend build at `/` only if `backend/static/index.html` exists (`/app/static` in the image). Without a build, as in unit tests or a backend run on the host, the app serves the API only. The lifespan creates the OpenAI and Qdrant clients and the SQLAlchemy engine, points the Agents SDK at the app's own `AsyncOpenAI` client through `set_default_openai_client`, and stores the session factory (`sessionmaker`), the `KnowledgeBase`, the `NoteStore` and one `TurnRunner` on `app.state`. It also stores a `Readiness` (`app/services/readiness.py`) built on the same engine and Qdrant client, with the newest migration revision read from `alembic/versions` (`migration_head()`). It runs the checks once and logs the result; a failure never stops the start. Shutdown closes the clients and disposes the engine. `GET /health` is a liveness check that always returns `{"status": "ok"}`, so an outage of Postgres or Qdrant never gets the app restarted. `GET /ready` runs the three readiness checks at once, each limited to `CHECK_TIMEOUT_S` (2 s): `SELECT 1`, `alembic_version` against the head, and a collection with points (ingest creates the collection before it loads anything). A failed check returns a short reason and logs the exception, because the endpoint is public. `ServedByMiddleware` (`app/middleware/served_by.py`) is plain ASGI, so it adds `X-Served-By` to streamed responses too.
 
 **Dependencies.** Code gets settings and clients passed in; no module reads settings at import time. Routes get lifespan objects through FastAPI dependencies in `app/api/deps.py`, which read `app.state`. Add a new dependency there when a route first needs a new shared object.
 
 **Knowledge base.** Records are `KB-NNN.md` files with a YAML header (`id`, `title`, `type`, `updated`; products also have brand, concentration, family, gender, seasons, sizes with prices and points, an optional decant and availability) and a Markdown body in `##` sections. `RecordHeader` (`app/kb/corpus.py`) validates the header, and the file name must match the id. Records link to each other as plain IDs ("see KB-052"), never in square brackets, which is Zoomer's citation format. `chunk_record()` splits a body at `##` headings, packs neighbouring sections up to 500 tokens, splits an oversized section on paragraphs and then sentences, starts every chunk after the first with the last ~75 tokens of the previous one, and gives each chunk a `Title › Sections` breadcrumb that is embedded with it. Ingest skips records whose file hash matches `kb_records.content_hash`, embeds the rest in batches, upserts points with id `uuid5(record id, chunk index)` and deletes leftover chunks, then deletes records that left the corpus. A newly created collection makes it a full run. The collection uses cosine distance, HNSW `m=16`, `ef_construct=100` and `indexing_threshold=10` kB, because Qdrant's default threshold (10,000 kB) is bigger than the whole corpus and would leave it unindexed; ingest waits for the index and prints `indexed_vectors_count`. The payload has `source`, `title`, `chunk_index`, `record_id`, `type`, `updated`, `section`, `text` and, for products, `price` (the cheapest bottle), with payload indexes on `record_id`, `type` and `price`. `search()` (`app/kb/search.py`) embeds the query and filters by `type` and `max_price`. Postgres commits the new hashes only after Qdrant has the points, so a failed run is simply repeated.
 
-**Migrations.** The container entrypoint runs `alembic upgrade head` before it starts uvicorn. `alembic/env.py` reads the DSN from the app settings, so the database URL is defined in exactly one place.
+**Migrations.** The one-off `migrate` Compose service runs `alembic upgrade head` once before `api` starts, so several API replicas never race on migrations. `alembic/env.py` builds its engine from `Settings.database_url`, the same URL the app uses, so the `DB_*` settings are the only place it is configured.
 
 **Web chat.** A single page with no router and no state library. On load, `useSession` calls `/api/me`; a 401 shows `SignInFlow`, where Zoomer asks for the phone and then the name as chat bubbles. Zoomer's first question is in the frontend, and every later line comes from the API's `message`. When signed in, `ChatPage` remounts per user. `useChat` loads the conversation list, opens the most recent conversation with its transcript, and keeps the rest in React state. "New chat" only clears the view. The next message goes without a conversation id, the server creates the conversation when its turn starts, and the stream's `start` event sets it as the open chat and refreshes the list, so the list never fills with empty chats. Replies stream in: `useChat` reads `/api/chat/stream` through `src/api/sse.ts`, which buffers network chunks into events and skips the keep-alive pings. The reply bubble shows a loader and the tool Zoomer is using until the first token arrives, and `done` replaces the streamed text with the stored reply. The `usage` event (and `usage` in the transcript) shows as a `CostBadge` under the answer ("$0.00047 · 2 calls · 62% cached"). A message refused before its turn starts (no `start` event: a 429, a 409 or a network error) leaves the chat, and `send()` resolves to `false`, so `Composer` puts the text back. While a reply streams, the composer's Send button turns into Stop, which aborts the request; the partial reply stays with a "Stopped" note, as it does after a reload. `useChat` also aborts the request when it unmounts (on log out, for example), so the turn stops instead of running on in the background. Sending and switching chats are blocked while a reply streams or a transcript loads. API errors with a code show their `message` (a rate limit, or a 409 from a second tab, for example); other failures show a generic line. All requests go through `src/api/client.ts`. Request and response types come from `src/api/schema.d.ts`, generated from `backend/openapi.json` by `openapi-typescript`; each API module re-exports them under the names the components use. Only the pairing of stream event names and payloads (`ChatEvent` in `src/api/chat.ts`) is written by hand. The composer keeps its own draft and `MessageBubble` is memoized, so typing and streamed tokens re-render only the parts that changed. Assistant replies render as Markdown through `MarkdownText` (GFM tables included, which scroll sideways when they don't fit, so the `/cost` table works on a phone; raw HTML is not rendered); user messages render as plain text. In a reply, each `[KB-042]` citation becomes a `CitationChip` (red when invalid), with a "Sources" row of the valid ones under the bubble; a chip opens `RecordDrawer` with the full record from `/api/records/{id}`. `StepLog` under each reply lists the tool calls (collapsed) or says "No tools used", and flags invalid or missing citations. The header's Tools button opens `ToolsModal` with the tool schemas. `NotesPanel` in the right aside lists the customer's notes from `/api/notes` and reloads when a `save_note` step succeeds or a note is proposed or decided (`useChat`'s `notesVersion`). A `pending_note` event (or a reply's `notes` in the transcript) shows a `PendingNoteCard` under the reply, with Save and Don't save; a pending note in the panel shows the same card. Both call `useChat`'s `decideNote()`, which posts the decision, updates the card in the chat and reloads the panel. It is a stable callback, so the memoized bubbles don't re-render with every token. A decided card turns into one line ("Saved to your notes" or "Not saved"). `ModeBadge` shows the security mode from the signed-in user's `security`, with each defense in its tooltip: in the header from the `md` breakpoint, above the conversation list below it, where the header has no room. Below the `md` breakpoint the aside folds away and the header's Notes button opens it. On phones, Notes, Tools and Log out are icon buttons, so the header fits. The color scheme follows the system, and the header toggle overrides it. Keep the UI minimal and functional: stock Mantine components and the theme in `theme.ts`. In development the Vite dev server proxies `/api` to `localhost:8000`, so the browser never needs CORS. In the image, the first Docker stage builds the frontend and the runtime stage copies `frontend/dist` to `/app/static`.
 
@@ -162,11 +169,12 @@ Unit tests live in `backend/tests/` and run with pytest (`asyncio_mode = "auto"`
 - Cost tests cover the price math (cached, cache-write and uncached tokens, embeddings, an unknown model), `TurnUsage` sums, the `/cost` table and the `/cost` route (no turn, no model, logged as a command). Prompt tests check the static prompt's size and the Kyiv time in the context note. Tool tests call each tool through `on_invoke_tool`, the way the agent loop does; the `save_note` test passes an extra `user_id` and checks that the note goes to the bound user. The tool context's `security` is set per test (`HARDENED` and `VULNERABLE` in `tests/fakes.py`): wrapping and escaping, a save refused after a search, a save that only proposes a pending note. API tests cover the security mode in `/api/me` (the default and one override), that every protected route needs a signed-in user, the confirm and reject endpoints, and the proposed notes in the transcript.
 - Chat API tests run both endpoints on a `FakeTurnRunner` that streams canned events (its `run()` is the real runner's), and read the stream route's server-sent events from the response body.
 - Web chat tests mount a tiny fake build from a temporary directory.
+- Probe tests run the real `Readiness` on `FakeEngine` and `FakeQdrant` (`tests/fakes.py`): all checks passing, an old schema and an empty collection, and a hanging and a failing service (no error text in the response). They also check `/api/whoami` and the `X-Served-By` header. Config tests check that `DB_PASSWORD` is required and that the database URL keeps a password with URL characters.
 - Knowledge base tests cover header parsing, the corpus checks (including a run over the shipped `backend/corpus/`), chunk limits, overlap and breadcrumbs, and the search filters. `tiktoken` downloads the `cl100k_base` encoding on first use and caches it, so the first chunking test needs network access.
 
 Keep tests few and focused: the happy path plus the errors that matter. Replace external services with fakes at the boundary instead of starting them. The frontend has no test suite; it is checked by lint, formatting and the type-checked build.
 
-CI (`.github/workflows/ci.yml`) runs on pull requests and pushes to `dev` and `main`. Job `backend` runs `uv sync --frozen`, `ruff check`, `ruff format --check` and `pytest` in `backend/`, then regenerates `openapi.json` and fails if it changed. Job `frontend` runs `npm ci`, `npm run lint`, `npm run format:check`, regenerates `src/api/schema.d.ts` from `backend/openapi.json` (failing if it changed) and runs `npm run build` in `frontend/`. Job `docker` builds the image with Buildx and caches its layers in the GitHub Actions cache. It pulls Docker Hub base images through the `mirror.gcr.io` mirror, because Docker Hub rate-limits anonymous pulls from shared runner IPs (429); BuildKit falls back to Docker Hub if the mirror fails.
+CI (`.github/workflows/ci.yml`) runs on pull requests and pushes to `dev` and `main`. Job `backend` runs `uv sync --frozen`, `ruff check`, `ruff format --check` and `pytest` in `backend/`, then regenerates `openapi.json` and fails if it changed. Job `frontend` runs `npm ci`, `npm run lint`, `npm run format:check`, regenerates `src/api/schema.d.ts` from `backend/openapi.json` (failing if it changed) and runs `npm run build` in `frontend/`. Job `k8s` renders `k8s/` with `kubectl kustomize` (with `secrets.env.example` copied to `secrets.env`) and validates it with `kubeconform -strict` against the Kubernetes 1.37 schemas, the version kind runs. Job `docker` builds the image with Buildx and caches its layers in the GitHub Actions cache. It pulls Docker Hub base images through the `mirror.gcr.io` mirror, because Docker Hub rate-limits anonymous pulls from shared runner IPs (429); BuildKit falls back to Docker Hub if the mirror fails.
 
 ## Configuration
 
@@ -174,11 +182,15 @@ The app reads environment variables only, through `app/core/config.py`. For loca
 
 - `.env.example` is the committed template. `.env` holds real secrets and is git-ignored.
 - `SESSION_SECRET` is required and must be at least 32 characters (`openssl rand -hex 32`). Changing it signs everyone out.
-- Compose passes the root `.env` into the `api` container (`env_file`). Postgres credentials also have defaults in `docker-compose.yml`.
-- Inside Compose, services reach each other by service name (`postgres`, `qdrant`). A backend run on the host must point `DATABASE_URL` and `QDRANT_URL` at `localhost` (see Common Commands).
+- Postgres: `DB_HOST`, `DB_PORT`, `DB_NAME` and `DB_USER` have defaults for Compose; `DB_PASSWORD` is required, with no default. `Settings.database_url` builds the asyncpg URL from them with SQLAlchemy's `URL.create`, so any password characters work.
+- Compose passes the root `.env` into `migrate`, `ingest` and `api` (`env_file`), and fills the `postgres` service's `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` from `DB_USER`, `DB_PASSWORD` and `DB_NAME` with `${VAR:?}`, so Compose refuses to start when one is missing. Postgres reads them only on an empty data volume.
+- `APP_VERSION` (`dev` by default) is a build argument: Compose builds the image with it and tags it `zoomerfume:<APP_VERSION>`, and the Dockerfile stores it as an environment variable, so `/api/whoami` and the OpenAPI version report it.
+- Inside Compose, services reach each other by service name (`postgres`, `qdrant`). A backend run on the host must point `DB_HOST` and `QDRANT_URL` at `localhost` (see Common Commands).
 - The knowledge base settings are `QDRANT_COLLECTION` (`kb_chunks`), `CORPUS_DIR` (`corpus`, relative to the working directory: `backend/` on the host, `/app` in the image), `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS`. Changing the model or dimensions needs a new collection.
 - `SECURITY_MODE` is `hardened` (default) or `vulnerable`. `HARDEN_UNTRUSTED_WRAP`, `HARDEN_RW_SEPARATION` and `HARDEN_CONFIRM_NOTES` (`true`/`false`, unset follows the mode) turn one defense on or off. The mode is read at startup, so a switch needs a restart and, for a clean demo, a new chat.
 - After editing `.env`, recreate the container with `docker compose up -d api`. `docker compose restart` reuses the old container config and does not re-read `.env`.
+
+On Kubernetes the same settings come from the ConfigMap `app-config` (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `QDRANT_URL`, `SECURITY_MODE`; everything else keeps the app's default) and the Secret `app-secrets` (`DB_PASSWORD`, `OPENAI_API_KEY`, `SESSION_SECRET`, generated from the git-ignored `k8s/secrets.env`), both through `envFrom`. The Postgres pod reads `POSTGRES_USER`, `POSTGRES_DB` and `POSTGRES_PASSWORD` from the same keys. The image tag is set once, in `images:` in `k8s/kustomization.yaml`; `kind-up.sh` builds the image with that tag as its `APP_VERSION`. Environment variables are read when a container starts, so after changing either one run `kubectl apply -k k8s/` and `kubectl rollout restart -n zoomerfume deployment/api`.
 
 The frontend has no configuration of its own. It calls the API on the same origin.
 
@@ -189,18 +201,21 @@ Run Compose commands from the repo root. Run uv, ruff and alembic from `backend/
 Full stack (the dev override adds `--reload`, file sync and host ports for Postgres and Qdrant). The web chat is at http://localhost:8000:
 
 ```bash
-cp .env.example .env               # first time only; set OPENAI_API_KEY and SESSION_SECRET
+cp .env.example .env               # first time only; set OPENAI_API_KEY, SESSION_SECRET and DB_PASSWORD
 docker compose up --build          # add --watch to sync backend/app changes live
 docker compose logs -f api
 docker compose -f docker-compose.yml up -d --build   # without the dev override
+APP_VERSION=1.1.0 docker compose up --build          # builds and runs zoomerfume:1.1.0
 ```
 
-`--watch` syncs only `backend/app/`. Changes to `pyproject.toml` or `uv.lock` trigger a rebuild. Frontend changes need `docker compose up --build`, or use the Vite dev server below. New migrations need `docker compose up --build`, because the entrypoint applies them when the container starts.
+`--watch` syncs only `backend/app/`. Changes to `pyproject.toml` or `uv.lock` trigger a rebuild. Frontend changes need `docker compose up --build`, or use the Vite dev server below. New migrations and corpus changes need `docker compose up --build`: `migrate` and `ingest` run from the image on every `up`.
 
 Smoke checks:
 
 ```bash
 curl localhost:8000/health
+curl localhost:8000/ready                   # 200 with every check ok; stop qdrant to see a 503
+curl -i localhost:8000/api/whoami           # the container id and version, also in X-Served-By
 curl -s localhost:8000/ | grep '<title>'    # the built web chat
 # sign in (a cookie jar keeps the session), chat; the first message starts a conversation
 curl -c jar -b jar -X POST localhost:8000/api/auth/phone \
@@ -234,11 +249,12 @@ docker compose exec postgres psql -U zoomer -d zoomerfume \
 Knowledge base (needs the stack up; ingest and search call the OpenAI embeddings API, a full ingest costs well under a cent):
 
 ```bash
-docker compose run --rm api python -m app.kb.ingest            # second run: everything skipped
-docker compose run --rm api python -m app.kb.search "vanilla and tobacco" --type product --max-price 3000
-docker compose run --rm api python -m app.eval.rephrase        # target: hit@5 ≥ 90%
-docker compose run --rm api python -m app.eval.injection --runs 5   # vulnerable 5/5 saved, hardened 0/5
-docker compose run --rm api python -m app.eval.unanswerable        # every reply says Zoomer doesn't know
+docker compose logs ingest                                     # the ingest that ran on `up`
+docker compose run --rm ingest python -m app.kb.ingest --force # re-embed everything (or --dry-run)
+docker compose exec api python -m app.kb.search "vanilla and tobacco" --type product --max-price 3000
+docker compose exec api python -m app.eval.rephrase        # target: hit@5 ≥ 90%
+docker compose exec api python -m app.eval.injection --runs 5   # vulnerable 5/5 saved, hardened 0/5
+docker compose exec api python -m app.eval.unanswerable        # every reply says Zoomer doesn't know
 curl -s localhost:6333/collections/kb_chunks                   # points_count, indexed_vectors_count
 docker compose exec postgres psql -U zoomer -d zoomerfume -c 'select id, type, title from kb_records limit 5'
 ```
@@ -251,7 +267,7 @@ Backend on the host, with Postgres and Qdrant in Docker:
 docker compose up -d postgres qdrant
 cd backend
 uv sync
-export DATABASE_URL=postgresql+asyncpg://zoomer:zoomer@localhost:5432/zoomerfume
+export DB_HOST=localhost
 export QDRANT_URL=http://localhost:6333
 uv run alembic upgrade head
 uv run uvicorn --factory app.main:create_app --reload
@@ -287,6 +303,20 @@ npm install <package>              # updates package.json and package-lock.json
 
 `/docs` (Swagger UI) is available only when `DEBUG=true`. `/openapi.json` is always available.
 
+Kubernetes (Docker, kind and kubectl; stop the Compose `api` first if it holds port 8000):
+
+```bash
+cp k8s/secrets.env.example k8s/secrets.env   # or grep -E '^(DB_PASSWORD|OPENAI_API_KEY|SESSION_SECRET)=' .env > k8s/secrets.env
+scripts/kind-up.sh                            # about a minute from an empty cluster
+kubectl port-forward -n zoomerfume svc/api 8000:8000
+kubectl -n zoomerfume get deploy,pods,jobs,svc
+kubectl -n zoomerfume exec deploy/api -- python -c 'import urllib.request
+for _ in range(12): print(urllib.request.urlopen("http://api:8000/api/whoami").read().decode())'   # all three pod names
+kubectl -n zoomerfume exec deploy/postgres -- sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select * from notes"'
+kubectl kustomize k8s/ | kubeconform -strict -summary -kubernetes-version 1.37.0   # what CI runs
+kind delete cluster --name zoomerfume        # everything, the data included
+```
+
 If the user asks Claude to run the project, the API or the full stack, Claude should start the required processes in its own background terminal when possible. Do not stop at listing commands. Report the command, working directory, URL/port, and any missing dependency or config that prevents startup: Docker not running, no `OPENAI_API_KEY`, a port already in use, and so on.
 
 ## Notes
@@ -302,4 +332,7 @@ If the user asks Claude to run the project, the API or the full stack, Claude sh
 - Every chat check calls OpenAI and costs a little. Keep manual checks short.
 - After changing the chunking or the embedding model, run ingest with `--force`: the file hashes haven't changed, so a normal run would skip every record.
 - `indexed_vectors_count` equals `points_count` only on a fresh collection. After any re-embed or delete it stays higher, because Qdrant vacuums only segments with at least 1,000 vectors. Search is not affected.
-- `.dockerignore` excludes only the repo docs (`README.md`, `CLAUDE.md`, `docs/`). The corpus is Markdown, so a broader `*.md` rule would ship an image with no records.
+- `.dockerignore` excludes the repo docs (`README.md`, `CLAUDE.md`, `docs/`) but no other Markdown: the corpus is Markdown, so a broader `*.md` rule would ship an image with no records. It also excludes `k8s/` (with the real `secrets.env`) and `scripts/`.
+- `kind load docker-image` fails on Docker's containerd image store (`ctr: content digest ... not found`): it exports the whole multi-platform index without the other platforms' layers. `kind-up.sh` saves only this machine's platform (`docker save --platform`) and runs `kind load image-archive` instead.
+- A Job's pod template can't be changed. The Jobs have `ttlSecondsAfterFinished: 3600`, so a finished Job deletes itself and the next `kubectl apply -k k8s/` runs it again (both are safe to repeat). Change the api image for a test with `kubectl set image deployment/api`, not in `kustomization.yaml`, because that would change the Jobs too.
+- `kubectl apply -k k8s/` always prints `secret/app-secrets configured`: kustomize line-wraps base64 values over 76 characters, the API server stores them on one line. Nothing changes; `kubectl diff -k k8s/` is empty.

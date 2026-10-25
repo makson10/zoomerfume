@@ -11,8 +11,58 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** Health Check */
+    /**
+     * Health Check
+     * @description Liveness: the process is up and answers.
+     *
+     *     It checks nothing else, so a Postgres or Qdrant outage never gets the app restarted.
+     */
     get: operations['health_check_health_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/ready': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Readiness Check
+     * @description Readiness: whether this replica can serve chat.
+     *
+     *     Postgres must answer, the schema must be at the newest migration and the knowledge
+     *     base must have points. Until all three pass, the answer is a 503.
+     */
+    get: operations['readiness_check_ready_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/whoami': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Whoami
+     * @description Which replica answered: its hostname (the pod name in Kubernetes) and the app version.
+     *
+     *     No sign-in needed. Every response also names the replica in ``X-Served-By``.
+     */
+    get: operations['whoami_api_whoami_get']
     put?: never
     post?: never
     delete?: never
@@ -502,6 +552,21 @@ export interface components {
       phone: string
     }
     /**
+     * ReadinessOut
+     * @description Whether this replica can serve chat, and each check's result.
+     */
+    ReadinessOut: {
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'ready' | 'not_ready'
+      /** Checks */
+      checks: {
+        [key: string]: string
+      }
+    }
+    /**
      * RecordOut
      * @description A full knowledge base record: its header fields and its Markdown body.
      */
@@ -708,6 +773,16 @@ export interface components {
       phone_masked: string
       security: components['schemas']['SecurityPolicy']
     }
+    /**
+     * WhoAmI
+     * @description The replica that answered and the app version it runs.
+     */
+    WhoAmI: {
+      /** Hostname */
+      hostname: string
+      /** Version */
+      version: string
+    }
   }
   responses: never
   parameters: never
@@ -727,6 +802,7 @@ export type NewPhone = components['schemas']['NewPhone']
 export type NoteOut = components['schemas']['NoteOut']
 export type PendingNote = components['schemas']['PendingNote']
 export type PhoneRequest = components['schemas']['PhoneRequest']
+export type ReadinessOut = components['schemas']['ReadinessOut']
 export type RecordOut = components['schemas']['RecordOut']
 export type SecurityPolicy = components['schemas']['SecurityPolicy']
 export type SignInResponse = components['schemas']['SignInResponse']
@@ -739,6 +815,7 @@ export type TurnResult = components['schemas']['TurnResult']
 export type TurnStart = components['schemas']['TurnStart']
 export type TurnUsage = components['schemas']['TurnUsage']
 export type UserOut = components['schemas']['UserOut']
+export type WhoAmI = components['schemas']['WhoAmI']
 export type $defs = Record<string, never>
 export interface operations {
   health_check_health_get: {
@@ -759,6 +836,73 @@ export interface operations {
           'application/json': {
             [key: string]: string
           }
+        }
+      }
+      /** @description Client Error */
+      '4XX': {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorBody']
+        }
+      }
+    }
+  }
+  readiness_check_ready_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReadinessOut']
+        }
+      }
+      /** @description A check failed */
+      503: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReadinessOut']
+        }
+      }
+      /** @description Client Error */
+      '4XX': {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorBody']
+        }
+      }
+    }
+  }
+  whoami_api_whoami_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WhoAmI']
         }
       }
       /** @description Client Error */

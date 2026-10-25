@@ -27,6 +27,10 @@ frontend/dist/
 .env
 .env.*
 
+# Kubernetes manifests, their secrets file and the kind script
+k8s/
+scripts/
+
 # Version control
 .git/
 .gitignore

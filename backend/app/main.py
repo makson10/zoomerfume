@@ -24,11 +24,13 @@ from app.api.spa import mount_web_chat
 from app.api.tools import router as tools_router
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
-from app.db.engine import create_db_engine, ping_db
+from app.db.engine import create_db_engine
 from app.kb.knowledge_base import KnowledgeBase
 from app.middleware.request_context import FastAPILoggingMiddleware
+from app.middleware.served_by import ServedByMiddleware
 from app.services.clients import create_openai_client, create_qdrant_client
 from app.services.notes import NoteStore
+from app.services.readiness import Readiness, migration_head
 
 logger = logging.getLogger(__name__)
 
@@ -57,21 +59,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     set_default_openai_client(openai_client)
     knowledge_base = KnowledgeBase(settings, qdrant_client, openai_client, sessionmaker)
     notes = NoteStore(sessionmaker)
+    readiness = Readiness(engine, qdrant_client, settings.qdrant_collection, migration_head())
     app.state.sessionmaker = sessionmaker
     app.state.kb = knowledge_base
     app.state.notes = notes
     app.state.turn_runner = TurnRunner(settings, engine, knowledge_base, notes)
+    app.state.readiness = readiness
 
-    if await ping_db(engine):
-        logger.info("Postgres is reachable")
-    else:
-        logger.warning("Could not reach Postgres. Sign-in and chat fail until it is back")
-    try:
-        await qdrant_client.get_collections()
-        logger.info("Qdrant is reachable at %s", settings.qdrant_url)
-    except Exception:
-        logger.warning("Could not reach Qdrant at %s", settings.qdrant_url)
-    logger.info("Zoomerfume API is ready")
+    logger.info("Zoomerfume API started, readiness: %s", await readiness.check())
 
     yield
 
@@ -94,7 +89,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="Zoomerfume API",
         description="Chat API for Zoomer, the AI consultant of the Zoomerfume perfume shop.",
-        version="1.0.0",
+        version=settings.app_version,
         docs_url="/docs" if settings.debug else None,
         redoc_url="/redoc" if settings.debug else None,
         responses=ERROR_RESPONSES,
@@ -102,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
 
+    app.add_middleware(ServedByMiddleware)
     app.add_middleware(FastAPILoggingMiddleware)
     app.add_middleware(
         SessionMiddleware,
