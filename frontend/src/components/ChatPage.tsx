@@ -24,6 +24,9 @@ import { ModeBadge } from './ModeBadge.tsx'
 import { NotesPanel } from './NotesPanel.tsx'
 import { RecordDrawer } from './RecordDrawer.tsx'
 
+/** Both side panels share one width, so the chat stays centered between them. */
+const SIDE_PANEL_WIDTH = 280
+
 interface HeaderButtonProps {
   label: string
   icon: TablerIcon
@@ -106,12 +109,12 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
     <AppShell
       header={{ height: 60 }}
       navbar={{
-        width: 260,
+        width: SIDE_PANEL_WIDTH,
         breakpoint: 'sm',
         collapsed: { mobile: !navbarOpened },
       }}
       aside={{
-        width: 280,
+        width: SIDE_PANEL_WIDTH,
         breakpoint: 'md',
         collapsed: { mobile: !notesOpened },
       }}
