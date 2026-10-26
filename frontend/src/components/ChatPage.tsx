@@ -11,7 +11,6 @@ import { useDisclosure } from '@mantine/hooks'
 import {
   IconLogout,
   IconNotes,
-  IconTool,
   IconUser,
   type TablerIcon,
 } from '@tabler/icons-react'
@@ -24,7 +23,6 @@ import { Header } from './Header.tsx'
 import { ModeBadge } from './ModeBadge.tsx'
 import { NotesPanel } from './NotesPanel.tsx'
 import { RecordDrawer } from './RecordDrawer.tsx'
-import { ToolsModal } from './ToolsModal.tsx'
 
 interface HeaderButtonProps {
   label: string
@@ -82,7 +80,6 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
   const chat = useChat()
   const [navbarOpened, navbar] = useDisclosure()
   const [notesOpened, notes] = useDisclosure()
-  const [toolsOpened, tools] = useDisclosure()
   const [recordId, setRecordId] = useState<string | null>(null)
 
   function toggleNavbar() {
@@ -151,11 +148,6 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
                 hiddenFrom="md"
               />
               <HeaderButton
-                label="Tools"
-                icon={IconTool}
-                onClick={tools.open}
-              />
-              <HeaderButton
                 label="Log out"
                 icon={IconLogout}
                 onClick={onLogOut}
@@ -196,7 +188,6 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
         />
       </AppShell.Main>
       <RecordDrawer recordId={recordId} onClose={() => setRecordId(null)} />
-      <ToolsModal opened={toolsOpened} onClose={tools.close} />
     </AppShell>
   )
 }

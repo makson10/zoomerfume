@@ -43,7 +43,7 @@ docker compose up --build
 
 Open http://localhost:8000. Zoomer asks for your phone number, and for your name if the number is new. There is no SMS code, since the shop is fictional. Your conversations are listed on the left; "New chat" starts another one. Log out to switch to a different customer.
 
-Ask something like "vanilla and tobacco under 3,000 ₴?": while Zoomer searches you see which tool it is using, then the answer streams in. It cites records as chips (click one to read the full record), and the line under it shows which tools Zoomer used. A general question such as "EDP vs EDT?" shows "No tools used". Ask Zoomer to add a perfume to your wishlist: Zoomer proposes the note in a card under its answer, and **Save** puts it in the **Notes** panel on the right (behind the **Notes** button on smaller screens). The badge in the header shows the security mode the server runs in. The Stop button next to the message box stops a reply halfway; what Zoomer wrote so far stays. Under each answer you see what it cost, and typing `/cost` shows the whole conversation's cost per turn (see [Caching and cost](#caching-and-cost)). The **Tools** button shows the exact tool schemas the model receives.
+Ask something like "vanilla and tobacco under 3,000 ₴?": while Zoomer searches you see which tool it is using, then the answer streams in. It cites records as chips (click one to read the full record), and the line under it shows which tools Zoomer used. A general question such as "EDP vs EDT?" shows "No tools used". Ask Zoomer to add a perfume to your wishlist: Zoomer proposes the note in a card under its answer, and **Save** puts it in the **Notes** panel on the right (behind the **Notes** button on smaller screens). The badge in the header shows the security mode the server runs in. The Stop button next to the message box stops a reply halfway; what Zoomer wrote so far stays. Under each answer you see what it cost, and typing `/cost` shows the whole conversation's cost per turn (see [Caching and cost](#caching-and-cost)).
 
 `docker compose up` also loads `docker-compose.override.yml` (auto-reload, Postgres and Qdrant ports on `localhost`). Add `--watch` to sync backend code changes into the running container.
 
@@ -101,7 +101,7 @@ How Compose maps to Kubernetes, how the stack settles without `depends_on`, wher
 
 ## Why the model can never pass a user id
 
-`save_note` is the only tool that writes, and its schema has a single property, `text`. The **Tools** button (or `GET /api/tools/schema`) shows it exactly as the model receives it: strict mode, `additionalProperties: false`, no user id anywhere.
+`save_note` is the only tool that writes, and its schema has a single property, `text`. `GET /api/tools/schema` shows it exactly as the model receives it: strict mode, `additionalProperties: false`, no user id anywhere.
 
 The customer comes from the signed session cookie, never from the model. For every message, `build_tools(user_id)` (`backend/app/agent/tools/__init__.py`) builds `save_note` with the signed-in customer's id captured in a closure. The run context the tools share holds no user id, so the closure is the only way the tool knows whose note it writes. The schema doesn't change with the user, so every customer's model calls see identical tool definitions.
 
