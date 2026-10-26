@@ -39,7 +39,7 @@ export function ChatPanel({
       h="100%"
       style={{ display: 'flex', flexDirection: 'column' }}
     >
-      <ScrollArea flex={1} mih={0}>
+      <ScrollArea flex={1} mih={0} type="never">
         <MessageList
           messages={messages}
           loading={loading}
