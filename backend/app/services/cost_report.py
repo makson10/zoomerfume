@@ -51,8 +51,6 @@ def cost_report(turns: Sequence[Turn], usage: Mapping[uuid.UUID, TurnUsage]) -> 
     hit_rate = total.cached_tokens / total.input_tokens if total.input_tokens else 0
     return "\n".join(
         [
-            "**What this chat cost** (times in Kyiv)",
-            "",
             HEADER,
             *rows,
             _row("**Total**", "", total),

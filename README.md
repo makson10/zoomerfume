@@ -69,7 +69,7 @@ curl -b jar -X POST localhost:8000/api/chat \
 #    "usage": {"calls": 2, "input_tokens": 14967, "cached_tokens": 14725, ..., "cost_usd": "0.000200950"}}
 curl -b jar -X POST localhost:8000/api/chat \
   -H 'content-type: application/json' -d '{"conversation_id": "<conversation id>", "message": "/cost"}'
-# → {"turn_id": null, "reply": "**What this chat cost** ...| # | Time | Calls | ...", "status": "ok"}
+# → {"turn_id": null, "reply": "| # | Time | Calls | ...", "status": "ok"}
 curl -b jar localhost:8000/api/records/KB-026      # the cited record in full
 curl -b jar localhost:8000/api/notes               # the customer's notes, newest first; the new one is "pending"
 curl -b jar -X POST localhost:8000/api/notes/<note id>/confirm   # the customer saves it; /reject drops it
