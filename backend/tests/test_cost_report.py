@@ -34,8 +34,7 @@ def test_cost_report_lists_each_finished_turn_and_the_total() -> None:
         "| 2 | 13:05 | 2 | 6,200 | 3,900 | 2,100 | 120 | $0.000382 |",
         "| **Total** |  | 3 | 8,200 | 3,900 | 3,900 | 160 | $0.000647 |",
     ]
-    assert "48% of the input tokens were read from the cache." in lines
-    assert lines[-1].startswith("Turn 1 starts with a cache write")
+    assert lines[-1] == "48% of the input tokens were read from the cache."
 
 
 def test_cost_report_has_nothing_to_count_before_a_finished_turn() -> None:
