@@ -1,10 +1,10 @@
 import {
   ActionIcon,
   AppShell,
+  Badge,
   Box,
   Burger,
   Button,
-  Text,
   type MantineBreakpoint,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
@@ -12,6 +12,7 @@ import {
   IconLogout,
   IconNotes,
   IconTool,
+  IconUser,
   type TablerIcon,
 } from '@tabler/icons-react'
 import { useState } from 'react'
@@ -134,9 +135,14 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
               <Box visibleFrom="md">
                 <ModeBadge security={user.security} />
               </Box>
-              <Text size="sm" visibleFrom="sm">
+              <Badge
+                color="gray"
+                variant="light"
+                leftSection={<IconUser size={12} />}
+                visibleFrom="sm"
+              >
                 {user.name}
-              </Text>
+              </Badge>
               <HeaderButton
                 label="Notes"
                 icon={IconNotes}
