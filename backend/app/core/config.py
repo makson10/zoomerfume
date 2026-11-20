@@ -32,6 +32,8 @@ class Settings(BaseSettings):
 
     qdrant_url: str = "http://qdrant:6333"
     qdrant_collection: str = "kb_chunks"
+    # One point per product with its accord and note vectors, for the similar perfume search.
+    qdrant_products_collection: str = "products"
     # The folder with the KB-*.md records, relative to the working directory.
     corpus_dir: Path = Path("corpus")
     embedding_model: str = "text-embedding-3-small"
