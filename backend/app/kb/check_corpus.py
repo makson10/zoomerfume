@@ -14,6 +14,7 @@ from collections import Counter
 from pathlib import Path
 
 from app.kb.corpus import CorpusError, Record, load_corpus
+from app.kb.scent import NoteDictionary
 
 # Zoomer Points on a product card: 5% of the price, rounded down.
 POINTS_PERCENT = 5
@@ -28,6 +29,7 @@ _DOMAIN = re.compile(r"\b(?:[\w-]+\.)+(?:com|net|org|io|ua|eu|example)\b", re.IG
 def check(records: list[Record]) -> list[str]:
     """Return a description of every problem found in the records."""
     problems: list[str] = []
+    dictionary = NoteDictionary.load()
     ids = {record.header.id for record in records}
     product_prices = {
         record.header.id: {size.price for size in record.header.sizes}
@@ -40,6 +42,9 @@ def check(records: list[Record]) -> list[str]:
         for size in [*record.header.sizes, *filter(None, [record.header.decant])]:
             if size.points != size.price * POINTS_PERCENT // 100:
                 problems.append(f"{record_id}: {size.ml} ml earns {size.points} points")
+        for note in record.header.notes.all() if record.header.notes else []:
+            if dictionary.canonical(note) is None:
+                problems.append(f"{record_id}: the note {note!r} isn't in notes.yaml")
         for reference in set(_REFERENCE.findall(record.body)) - ids:
             problems.append(f"{record_id}: links to {reference}, which doesn't exist")
         if "[KB-" in record.body:

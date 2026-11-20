@@ -1,0 +1,292 @@
+# The note dictionary for the similar perfume search (app.kb.scent).
+#
+# accords: the scent families a product's accord vector is made of, one coordinate each.
+#   Changing this list changes the vector size, so the products collection has to be deleted
+#   before the next ingest.
+# notes: every note the product cards use, under one canonical name. "aliases" are the other
+#   spellings brands use for the same note. "accords" says how strongly the note brings in
+#   each accord, from 0 to 1.
+
+accords:
+  - citrus
+  - fruity
+  - green
+  - aromatic
+  - fresh
+  - aquatic
+  - mineral
+  - floral
+  - white_floral
+  - powdery
+  - sweet
+  - gourmand
+  - vanilla
+  - amber
+  - warm_spicy
+  - fresh_spicy
+  - woody
+  - smoky
+  - leather
+  - musky
+  - earthy
+  - balsamic
+  - tobacco
+  - boozy
+  - mossy
+  - creamy
+
+notes:
+  # Citrus
+  bergamot:
+    aliases: [calabrian bergamot]
+    accords: {citrus: 1.0, fresh: 0.5}
+  citrus:
+    aliases: [citrus notes]
+    accords: {citrus: 1.0, fresh: 0.5}
+  grapefruit:
+    accords: {citrus: 1.0, fresh: 0.4}
+  lemon:
+    aliases: [italian lemon, sicilian lemon, primofiore lemon]
+    accords: {citrus: 1.0, fresh: 0.5}
+  mandarin:
+    aliases: [blood mandarin, green mandarin, tangerine]
+    accords: {citrus: 1.0, fruity: 0.3, sweet: 0.2}
+  orange:
+    accords: {citrus: 1.0, fruity: 0.3}
+
+  # Fruits
+  apple:
+    aliases: [green apple]
+    accords: {fruity: 1.0, fresh: 0.4, green: 0.2}
+  blackcurrant:
+    aliases: [blackcurrant leaf]
+    accords: {fruity: 0.9, green: 0.4}
+  cherry:
+    aliases: [black cherry accord, griotte syrup]
+    accords: {fruity: 1.0, sweet: 0.6}
+  dates:
+    accords: {sweet: 0.8, fruity: 0.6, gourmand: 0.5}
+  fruits:
+    aliases: [fruit accord, tropical fruits]
+    accords: {fruity: 1.0, sweet: 0.4}
+  lychee:
+    accords: {fruity: 1.0, floral: 0.3, sweet: 0.3}
+  pear:
+    accords: {fruity: 1.0, sweet: 0.3, fresh: 0.2}
+  pineapple:
+    accords: {fruity: 1.0, sweet: 0.4}
+  raspberry:
+    accords: {fruity: 1.0, sweet: 0.5}
+  rhubarb:
+    accords: {fruity: 0.6, green: 0.6, fresh: 0.3}
+  wild berries:
+    accords: {fruity: 1.0, sweet: 0.4}
+
+  # Green and aromatic
+  galbanum:
+    accords: {green: 1.0, fresh: 0.3}
+  geranium:
+    accords: {floral: 0.6, aromatic: 0.5, green: 0.3}
+  juniper:
+    aliases: [juniper berries]
+    accords: {aromatic: 0.7, fresh: 0.6, green: 0.3, woody: 0.2}
+  lavender:
+    aliases: [french lavender, lavender blossom, lavandin]
+    accords: {aromatic: 1.0, floral: 0.3, fresh: 0.3}
+  licorice:
+    accords: {sweet: 0.7, aromatic: 0.4, warm_spicy: 0.3}
+  mint:
+    aliases: [mint leaves]
+    accords: {fresh: 1.0, aromatic: 0.5, green: 0.3}
+  pine:
+    aliases: [pine needle]
+    accords: {green: 0.7, fresh: 0.6, woody: 0.4, balsamic: 0.2}
+  sage:
+    aliases: [clary sage]
+    accords: {aromatic: 1.0, green: 0.4, earthy: 0.2}
+  star anise:
+    accords: {warm_spicy: 0.7, aromatic: 0.5, sweet: 0.3}
+  tea:
+    aliases: [jasmine tea accord]
+    accords: {green: 0.6, fresh: 0.4, aromatic: 0.3}
+
+  # Spices
+  cardamom:
+    accords: {fresh_spicy: 0.8, aromatic: 0.5, warm_spicy: 0.3}
+  cinnamon:
+    accords: {warm_spicy: 1.0, sweet: 0.4}
+  clove:
+    aliases: [clove oil]
+    accords: {warm_spicy: 1.0, smoky: 0.2}
+  ginger:
+    accords: {fresh_spicy: 1.0, citrus: 0.3}
+  nutmeg:
+    accords: {warm_spicy: 1.0, woody: 0.2}
+  pepper:
+    aliases: [sichuan pepper]
+    accords: {fresh_spicy: 1.0, woody: 0.2}
+  pink pepper:
+    accords: {fresh_spicy: 1.0, fruity: 0.3, floral: 0.2}
+  saffron:
+    accords: {warm_spicy: 0.7, leather: 0.4, sweet: 0.2}
+  spices:
+    aliases: [spice notes]
+    accords: {warm_spicy: 1.0}
+
+  # Flowers
+  gardenia:
+    accords: {white_floral: 1.0, creamy: 0.3}
+  heliotrope:
+    accords: {powdery: 1.0, sweet: 0.5, floral: 0.4}
+  iris:
+    aliases: [orris]
+    accords: {powdery: 1.0, floral: 0.5, earthy: 0.2}
+  jasmine:
+    aliases: [jasmine sambac, jasmine grandiflorum, creamy jasmine]
+    accords: {white_floral: 1.0, floral: 0.5, sweet: 0.2}
+  lily of the valley:
+    accords: {floral: 1.0, fresh: 0.5, green: 0.3}
+  mahonial:
+    accords: {floral: 0.8, fresh: 0.3}
+  monoï:
+    accords: {white_floral: 0.8, creamy: 0.5, sweet: 0.3}
+  neroli:
+    accords: {white_floral: 0.6, citrus: 0.5, fresh: 0.3}
+  orange blossom:
+    aliases: [moroccan orange blossom, orange flower]
+    accords: {white_floral: 1.0, floral: 0.4, sweet: 0.2}
+  orchid:
+    aliases: [orchid accord]
+    accords: {floral: 0.8, sweet: 0.4, powdery: 0.3}
+  rose:
+    aliases: [damascena rose, rose absolute]
+    accords: {floral: 1.0, fruity: 0.2}
+  tuberose:
+    aliases: [salty tuberose]
+    accords: {white_floral: 1.0, creamy: 0.4, sweet: 0.3}
+  violet:
+    aliases: [white violet]
+    accords: {floral: 0.7, powdery: 0.7, sweet: 0.2}
+
+  # Sweet and gourmand
+  almond:
+    aliases: [bitter almond]
+    accords: {gourmand: 0.8, sweet: 0.5, powdery: 0.3}
+  brown sugar:
+    accords: {sweet: 1.0, gourmand: 0.6}
+  chestnut:
+    aliases: [chestnut accord]
+    accords: {gourmand: 0.8, sweet: 0.3, woody: 0.3}
+  cocoa:
+    accords: {gourmand: 1.0, sweet: 0.4}
+  coconut:
+    aliases: [coconut wood, whipped coconut cream]
+    accords: {creamy: 0.8, sweet: 0.5, gourmand: 0.3}
+  coffee:
+    aliases: [black coffee]
+    accords: {gourmand: 0.8, smoky: 0.3, sweet: 0.2}
+  gourmand accord:
+    accords: {gourmand: 1.0, sweet: 0.8}
+  honey:
+    accords: {sweet: 1.0, gourmand: 0.4, floral: 0.2}
+  praline:
+    accords: {gourmand: 1.0, sweet: 0.8}
+  rum:
+    aliases: [rum absolute]
+    accords: {boozy: 1.0, sweet: 0.4}
+  tonka bean:
+    aliases: [venezuelan tonka bean, roasted tonka]
+    accords: {sweet: 0.7, gourmand: 0.5, vanilla: 0.3, powdery: 0.3}
+  vanilla:
+    aliases:
+      - vanilla from papua new guinea
+      - madagascar vanilla
+      - bourbon vanilla
+      - vanilla bean
+      - vanilla accord
+      - vanilla infusion
+      - vanilla caviar
+      - vanilla absolute
+      - vanilla surabsolute
+      - vanilla orchid
+      - madagascan vanilla orchid
+    accords: {vanilla: 1.0, sweet: 0.6, gourmand: 0.3}
+
+  # Woods
+  akigalawood:
+    accords: {woody: 0.8, fresh_spicy: 0.4, earthy: 0.3}
+  amberwood:
+    aliases: [woody amber, amber woods]
+    accords: {amber: 0.8, woody: 0.8}
+  birch:
+    accords: {smoky: 1.0, leather: 0.5, woody: 0.4}
+  cade oil:
+    accords: {smoky: 1.0, woody: 0.5}
+  cashmeran:
+    accords: {woody: 0.7, musky: 0.6, powdery: 0.3}
+  cedar:
+    aliases: [cedarwood, virginia cedar, atlas cedar]
+    accords: {woody: 1.0, fresh: 0.2}
+  guaiac wood:
+    aliases: [guaiac wood oil]
+    accords: {woody: 0.8, smoky: 0.6}
+  iso e super:
+    accords: {woody: 1.0, musky: 0.4, amber: 0.3}
+  patchouli:
+    aliases: [indian patchouli]
+    accords: {earthy: 1.0, woody: 0.5}
+  sandalwood:
+    aliases: [new caledonian sandalwood, australian sandalwood]
+    accords: {woody: 1.0, creamy: 0.6}
+  vetiver:
+    aliases: [java vetiver]
+    accords: {woody: 0.7, earthy: 0.7, smoky: 0.2, green: 0.2}
+  woody notes:
+    aliases: [creamy woods]
+    accords: {woody: 1.0}
+
+  # Amber, resins and balsams
+  amber:
+    aliases: [leathery amber, white amber]
+    accords: {amber: 1.0, sweet: 0.4, balsamic: 0.3}
+  ambergris:
+    accords: {mineral: 0.7, amber: 0.5, musky: 0.4, aquatic: 0.3}
+  ambroxan:
+    aliases: [ambrox]
+    accords: {amber: 0.8, woody: 0.6, mineral: 0.5, musky: 0.3}
+  benzoin:
+    accords: {balsamic: 1.0, vanilla: 0.4, sweet: 0.4}
+  incense:
+    accords: {smoky: 1.0, balsamic: 0.5, woody: 0.3}
+  labdanum:
+    accords: {amber: 0.8, leather: 0.5, balsamic: 0.5}
+  myrrh:
+    accords: {balsamic: 0.8, smoky: 0.4, warm_spicy: 0.3}
+  oakmoss:
+    accords: {mossy: 1.0, earthy: 0.5, green: 0.3}
+  peru balsam:
+    accords: {balsamic: 1.0, vanilla: 0.4, sweet: 0.3}
+  styrax:
+    accords: {balsamic: 0.8, leather: 0.5, smoky: 0.3}
+
+  # Musks, leather and tobacco
+  ambrette:
+    aliases: [ambrette seeds]
+    accords: {musky: 0.8, fruity: 0.3, powdery: 0.3}
+  leather:
+    accords: {leather: 1.0, smoky: 0.3}
+  musk:
+    aliases: [musks, white musk, white musks]
+    accords: {musky: 1.0, powdery: 0.3}
+  tobacco:
+    aliases: [tobacco leaf, tobacco leaf absolute]
+    accords: {tobacco: 1.0, sweet: 0.3, warm_spicy: 0.2}
+
+  # Sea and air
+  marine accord:
+    accords: {aquatic: 1.0, fresh: 0.5, mineral: 0.3}
+  ozonic accord:
+    accords: {fresh: 1.0, aquatic: 0.5}
+  sea salt:
+    aliases: [sea salt accord]
+    accords: {mineral: 1.0, aquatic: 0.6}

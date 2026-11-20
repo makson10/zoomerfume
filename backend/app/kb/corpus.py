@@ -18,7 +18,16 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 RecordType = Literal["product", "policy", "company", "faq", "news"]
 Availability = Literal["in_stock", "few_left", "pre_order", "discontinued"]
 
-PRODUCT_FIELDS = ("brand", "concentration", "family", "gender", "seasons", "availability")
+PRODUCT_FIELDS = (
+    "brand",
+    "line",
+    "concentration",
+    "family",
+    "gender",
+    "seasons",
+    "notes",
+    "availability",
+)
 # A record id: "KB-" and three digits, e.g. "KB-042".
 RECORD_ID_PATTERN = r"^KB-\d{3}$"
 
@@ -37,6 +46,28 @@ class Size(BaseModel):
     points: int = Field(ge=0)
 
 
+class NotePyramid(BaseModel):
+    """A product's notes as the brand lists them. ``key`` holds the notes of a brand that
+    names key notes instead of a top, heart and base."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    top: list[str] = []
+    heart: list[str] = []
+    base: list[str] = []
+    key: list[str] = []
+
+    @model_validator(mode="after")
+    def _check_not_empty(self) -> NotePyramid:
+        if not self.all():
+            raise ValueError("a product needs at least one note")
+        return self
+
+    def all(self) -> list[str]:
+        """Every note on every level, as written."""
+        return [*self.top, *self.heart, *self.base, *self.key]
+
+
 class RecordHeader(BaseModel):
     """The front matter of a record. The product fields are required for products only."""
 
@@ -47,10 +78,13 @@ class RecordHeader(BaseModel):
     type: RecordType
     updated: date
     brand: str | None = None
+    # The product line flankers share, e.g. "Sauvage" for its EDT, EDP and Elixir.
+    line: str | None = None
     concentration: str | None = None
     family: str | None = None
     gender: Literal["men", "women", "unisex"] | None = None
     seasons: list[str] | None = None
+    notes: NotePyramid | None = None
     sizes: list[Size] = []
     decant: Size | None = None
     availability: Availability | None = None
