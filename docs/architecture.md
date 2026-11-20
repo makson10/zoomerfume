@@ -17,6 +17,7 @@ POST /api/chat/stream {conversation_id?, message}           (POST /api/chat: sam
       each model call: [static prompt ◆] [history] [new items] [note: Kyiv time, name]  (◆ cache breakpoint)
       ├─ model → search_kb   → embed the query → Qdrant (type / price filters) → envelope
       ├─ model → open_record → kb_records                                     → envelope
+      ├─ model → find_similar → kb_records (pg_trgm name match) → Qdrant products → envelope
       │     (hardened: record text inside <untrusted_data> tags)
       ├─ model → save_note   → notes, for the user bound in the closure        → envelope
       │     (hardened: refused after a read in this turn, otherwise a pending note)
@@ -85,8 +86,9 @@ Nothing is retrieved automatically. The model decides when to look something up,
 |---|---|---|
 | `search_kb` | `query`, `k` (1–8, default 5), `record_type` (`product`, `policy`, `company`, `faq`, `news` or null), `max_price` (UAH or null) | `hits`: `record_id`, `type`, `chunk_index`, `updated`, `price`, `score` and `text`, the passage with its breadcrumb (`Title › Sections`) on top |
 | `open_record` | `record_id`, e.g. `KB-042` | the record's `header` (for products: sizes, prices, availability) and its whole `body` |
+| `find_similar` | `product` (a name or a record id), `k` (1–5, default 3), `max_price` (UAH or null), `gender` (`men`, `women` or null; unisex always stays in) | `reference`: the card it compared with; `similar`: each match's card fields, `score`, `accords_similarity`, `notes_similarity`, `shared_notes` and `shared_accords`. How it ranks: [similar.md](similar.md) |
 
-Both tools take the run context as their first argument and reach the knowledge base through `TurnContext.kb`, a `KnowledgeBase` (`app/kb/knowledge_base.py`) built once on the app's OpenAI, Qdrant and Postgres clients. The record drawer in the web chat reads the same `kb_records` table through `GET /api/records/{id}`. With `HARDEN_UNTRUSTED_WRAP` on (the hardened default), a passage's `text` (breadcrumb included) and a record's `body` reach the model inside `<untrusted_data record="KB-…">` tags, through `TurnContext.security` (see [security.md](security.md)).
+The read tools take the run context as their first argument and reach the knowledge base through `TurnContext.kb`, a `KnowledgeBase` (`app/kb/knowledge_base.py`) built once on the app's OpenAI, Qdrant and Postgres clients. The record drawer in the web chat reads the same `kb_records` table through `GET /api/records/{id}`. With `HARDEN_UNTRUSTED_WRAP` on (the hardened default), a passage's `text` (breadcrumb included) and a record's `body` reach the model inside `<untrusted_data record="KB-…">` tags, through `TurnContext.security` (see [security.md](security.md)).
 
 ## Strict schemas
 
@@ -147,7 +149,7 @@ The web chat renders each citation as a chip that opens the full record. Invalid
 
 OpenAI caches the longest prefix a request shares with an earlier request under the same `prompt_cache_key`, and bills those tokens at a tenth of the input price. Writing a prefix to the cache costs 1.25× the input price. So the request has to start with what never changes and end with what always does. `RunConfig.call_model_input_filter` (`cacheable_input()` in `app/agent/input_filter.py`) orders every model call's input:
 
-1. The static prompt, from `instructions()` (`app/agent/prompts.py`): `AGENT_INSTRUCTIONS`, about 8 KB, plus the untrusted data rules (0.6 KB) when the wrapping is on. It is the same for every customer and every call, so the runner builds it once at startup, not per run. The API rejects an explicit cache breakpoint on the top-level `instructions`, so the filter sends the instructions as the first input item instead: a developer message whose `input_text` block has `prompt_cache_breakpoint: {"mode": "explicit"}`.
+1. The static prompt, from `instructions()` (`app/agent/prompts.py`): `AGENT_INSTRUCTIONS`, about 9 KB, plus the untrusted data rules (0.6 KB) when the wrapping is on. It is the same for every customer and every call, so the runner builds it once at startup, not per run. The API rejects an explicit cache breakpoint on the top-level `instructions`, so the filter sends the instructions as the first input item instead: a developer message whose `input_text` block has `prompt_cache_breakpoint: {"mode": "explicit"}`.
 2. The history and this turn's items: the customer's message, then the tool calls and outputs of this turn. Retrieved passages are tool outputs, so they come after the static prompt too.
 3. A developer note, always the last item: `Now: Tuesday, 20 October 2026, 15:42 Kyiv time. The customer's name is Mary.` The time is taken once per turn (`TurnContext.started_at`), so every call of a turn sends the same note. The shop's rules use Kyiv time and weekdays (courier cutoffs, support hours), so the note gives both.
 

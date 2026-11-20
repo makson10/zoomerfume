@@ -13,10 +13,15 @@ title: Creed Aventus
 type: product              # product | policy | company | faq | news
 updated: 2026-10-01
 brand: Creed               # the fields below are for products only
+line: Aventus              # the line flankers share
 concentration: EDP
 family: chypre fruity
 gender: men
 seasons: [spring, summer, autumn]
+notes:                     # as the brand lists them; key: [...] when there is no pyramid
+  top: [Calabrian bergamot, Sicilian lemon, blackcurrant leaf]
+  heart: [pineapple, pink pepper, jasmine]
+  base: [birch, patchouli, musk]
 sizes:
   - {ml: 50, price: 12490, points: 624}
   - {ml: 100, price: 17890, points: 894}
@@ -25,7 +30,7 @@ availability: in_stock     # in_stock | few_left | pre_order | discontinued
 ---
 ```
 
-`app/kb/corpus.py` parses the files with a pydantic model (`RecordHeader`), so a broken header fails loudly. `python -m app.kb.check_corpus` checks the records against each other: points match the price, every `KB-…` link exists, a price quoted next to a product link is one of that product's prices, contacts use the reserved `.example` domain, and no record ID appears in square brackets, which is the citation format Zoomer will use. A unit test runs the same checks on the shipped corpus.
+`app/kb/corpus.py` parses the files with a pydantic model (`RecordHeader`), so a broken header fails loudly. `python -m app.kb.check_corpus` checks the records against each other: points match the price, every `KB-…` link exists, a price quoted next to a product link is one of that product's prices, contacts use the reserved `.example` domain, every note a product lists is in the note dictionary of the similar perfume search ([similar.md](similar.md)), and no record ID appears in square brackets, which is the citation format Zoomer will use. A unit test runs the same checks on the shipped corpus.
 
 Records link to each other as plain IDs ("see KB-052"). Zoomer cites as `[KB-052]`, so a bracketed ID inside a record could be copied into an answer without that record ever being retrieved.
 
@@ -86,7 +91,8 @@ A filtered search that leaves only a few points, for example only products under
 2. Create the collection and its payload indexes if they don't exist. A new, empty collection makes this a full run.
 3. Skip records whose file hash hasn't changed. Chunk and embed the new and changed ones, upsert their points, and save the full record to `kb_records`.
 4. Delete the points and rows of records that are no longer in the corpus.
-5. Wait for the index and print a summary.
+5. Rebuild the `products` collection from the product headers, for the similar perfume search ([similar.md](similar.md)). It calls no API.
+6. Wait for the index and print a summary.
 
 A second run right after the first embeds nothing:
 
@@ -94,10 +100,12 @@ A second run right after the first embeds nothing:
 Records: 97 total, 97 changed, 0 skipped, 0 deleted
 Chunks: 208 embedded, 78,163 tokens
 Qdrant kb_chunks: 208 points, 208 indexed vectors (HNSW)
+Qdrant products: 40 products stored (accord and note vectors)
 
 Records: 97 total, 0 changed, 97 skipped, 0 deleted
 Chunks: 0 embedded, 0 tokens
 Qdrant kb_chunks: 208 points, 208 indexed vectors (HNSW)
+Qdrant products: 40 products stored (accord and note vectors)
 ```
 
 `--force` re-embeds everything, which is needed after a change to the chunking or the embedding model. `--dry-run` shows what would change without calling OpenAI or writing anything.
