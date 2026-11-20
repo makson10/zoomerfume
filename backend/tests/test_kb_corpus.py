@@ -15,10 +15,14 @@ title: Test Perfume
 type: product
 updated: 2026-05-01
 brand: Test
+line: Test
 concentration: EDP
 family: woody
 gender: unisex
 seasons: [autumn]
+notes:
+  top: [Calabrian bergamot]
+  base: [cedar]
 sizes:
   - {ml: 100, price: 4990, points: 249}
   - {ml: 50, price: 2990, points: 149}
@@ -59,8 +63,8 @@ def test_parse_record_rejects_bad_files(tmp_path: Path, name: str, text: str) ->
         parse_record(write(tmp_path, name, text))
 
 
-def test_check_flags_a_wrong_price_and_a_missing_link(tmp_path: Path) -> None:
-    write(tmp_path, "KB-001.md", PRODUCT)
+def test_check_flags_a_wrong_price_a_missing_link_and_an_unknown_note(tmp_path: Path) -> None:
+    write(tmp_path, "KB-001.md", PRODUCT.replace("[cedar]", "[cedar, unobtainium]"))
     faq = PRODUCT.split("brand:")[0].replace("KB-001", "KB-002").replace("product", "faq")
     write(tmp_path, "KB-002.md", faq + "---\n\nTest Perfume (KB-001) costs 3,500 ₴. See KB-099.\n")
 
@@ -68,6 +72,7 @@ def test_check_flags_a_wrong_price_and_a_missing_link(tmp_path: Path) -> None:
 
     assert any("3,500 ₴ isn't a price of KB-001" in problem for problem in problems)
     assert any("KB-099" in problem for problem in problems)
+    assert "KB-001: the note 'unobtainium' isn't in notes.yaml" in problems
 
 
 def test_shipped_corpus_passes_the_checks() -> None:

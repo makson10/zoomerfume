@@ -29,13 +29,12 @@ def test_cost_report_lists_each_finished_turn_and_the_total() -> None:
 
     lines = cost_report(turns, usage).splitlines()
 
-    assert lines[4:7] == [
+    assert lines[2:5] == [
         "| 1 | 12:05 | 1 | 2,000 | 0 | 1,800 | 40 | $0.000265 |",
         "| 2 | 13:05 | 2 | 6,200 | 3,900 | 2,100 | 120 | $0.000382 |",
         "| **Total** |  | 3 | 8,200 | 3,900 | 3,900 | 160 | $0.000647 |",
     ]
-    assert "48% of the input tokens were read from the cache." in lines
-    assert lines[-1].startswith("Turn 1 starts with a cache write")
+    assert lines[-1] == "48% of the input tokens were read from the cache."
 
 
 def test_cost_report_has_nothing_to_count_before_a_finished_turn() -> None:

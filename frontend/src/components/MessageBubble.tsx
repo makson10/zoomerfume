@@ -8,6 +8,18 @@ import { MarkdownText } from './MarkdownText.tsx'
 import { PendingNoteCard } from './PendingNoteCard.tsx'
 import { StepLog } from './StepLog.tsx'
 
+const CITATION_FOOTER = /(?<=[.!?…])(?:\s*\[KB-\d{3}\])+\s*$/
+
+/** Drops the citations after the reply's last sentence when the Sources row lists them all. */
+function withoutCitationFooter(content: string, sources: string[]): string {
+  const footer = CITATION_FOOTER.exec(content)
+  if (!footer) return content
+  const ids = footer[0].match(/KB-\d{3}/g) ?? []
+  return ids.every((id) => sources.includes(id))
+    ? content.slice(0, footer.index)
+    : content
+}
+
 interface MessageBubbleProps {
   message: ChatMessage
   /** Opens a cited record. Without it, citations stay plain text. */
@@ -40,6 +52,7 @@ export const MessageBubble = memo(function MessageBubble({
   }
 
   const { citations } = message
+  const sources = onOpenRecord ? (citations?.valid ?? []) : []
   const renderCitation = onOpenRecord
     ? (recordId: string) => (
         <CitationChip
@@ -57,7 +70,7 @@ export const MessageBubble = memo(function MessageBubble({
       ) : (
         <Paper px="md" py="xs" withBorder>
           <MarkdownText renderCitation={renderCitation}>
-            {message.content}
+            {withoutCitationFooter(message.content, sources)}
           </MarkdownText>
         </Paper>
       )}
@@ -70,12 +83,12 @@ export const MessageBubble = memo(function MessageBubble({
         message.notes?.map((note) => (
           <PendingNoteCard key={note.id} note={note} onDecide={onDecideNote} />
         ))}
-      {citations && onOpenRecord && citations.valid.length > 0 && (
+      {onOpenRecord && sources.length > 0 && (
         <Group gap={4}>
           <Text size="xs" c="dimmed">
             Sources:
           </Text>
-          {citations.valid.map((recordId) => (
+          {sources.map((recordId) => (
             <CitationChip
               key={recordId}
               recordId={recordId}

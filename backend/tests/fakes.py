@@ -15,6 +15,7 @@ from app.agent.runtime import NewTurn, TurnResult, TurnRunner, TurnStart
 from app.agent.streaming import Token, ToolCall, TurnEvent
 from app.core.security import SecurityPolicy
 from app.db.models import Conversation, KbRecord, Message, Note, ToolStep, Turn, User
+from app.kb.products import SimilarProduct
 from app.kb.search import Hit
 from app.services.conversations import conversation_title
 from app.services.notes import NoteStatus
@@ -159,14 +160,33 @@ def make_hit(record_id: str, score: float = 0.8) -> Hit:
     )
 
 
+def make_similar(record_id: str) -> SimilarProduct:
+    return SimilarProduct(
+        record_id=record_id,
+        title=f"Record {record_id}",
+        brand="Brand",
+        gender="men",
+        concentration="EDP",
+        availability="in_stock",
+        price=2500,
+        score=0.8,
+        accords_similarity=0.9,
+        notes_similarity=0.65,
+        shared_notes=["birch", "pineapple"],
+        shared_accords=["fruity", "smoky"],
+    )
+
+
 class FakeKnowledgeBase:
-    """Stands in for ``KnowledgeBase``: canned hits and records. Records every search, and
-    raises ``error`` when it is set."""
+    """Stands in for ``KnowledgeBase``: canned hits, records and similar products. Records
+    every search, and raises ``error`` from ``search`` when it is set."""
 
     def __init__(self) -> None:
         self.hits: list[Hit] = []
         self.records: dict[str, KbRecord] = {}
+        self.similar: list[SimilarProduct] = []
         self.searches: list[tuple[str, int, str | None, int | None]] = []
+        self.similar_searches: list[tuple[str, int, int | None, str | None]] = []
         self.error: Exception | None = None
 
     async def search(
@@ -179,6 +199,15 @@ class FakeKnowledgeBase:
 
     async def get_record(self, record_id: str) -> KbRecord | None:
         return self.records.get(record_id)
+
+    async def find_product(self, name: str) -> KbRecord | None:
+        return next((record for record in self.records.values() if record.title == name), None)
+
+    async def similar_products(
+        self, record_id: str, k: int, max_price: int | None, gender: str | None
+    ) -> list[SimilarProduct]:
+        self.similar_searches.append((record_id, k, max_price, gender))
+        return self.similar[:k]
 
 
 class FakeNoteStore:

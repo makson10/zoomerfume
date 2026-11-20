@@ -17,6 +17,7 @@ POST /api/chat/stream {conversation_id?, message}           (POST /api/chat: sam
       each model call: [static prompt ◆] [history] [new items] [note: Kyiv time, name]  (◆ cache breakpoint)
       ├─ model → search_kb   → embed the query → Qdrant (type / price filters) → envelope
       ├─ model → open_record → kb_records                                     → envelope
+      ├─ model → find_similar → kb_records (pg_trgm name match) → Qdrant products → envelope
       │     (hardened: record text inside <untrusted_data> tags)
       ├─ model → save_note   → notes, for the user bound in the closure        → envelope
       │     (hardened: refused after a read in this turn, otherwise a pending note)
@@ -85,12 +86,13 @@ Nothing is retrieved automatically. The model decides when to look something up,
 |---|---|---|
 | `search_kb` | `query`, `k` (1–8, default 5), `record_type` (`product`, `policy`, `company`, `faq`, `news` or null), `max_price` (UAH or null) | `hits`: `record_id`, `type`, `chunk_index`, `updated`, `price`, `score` and `text`, the passage with its breadcrumb (`Title › Sections`) on top |
 | `open_record` | `record_id`, e.g. `KB-042` | the record's `header` (for products: sizes, prices, availability) and its whole `body` |
+| `find_similar` | `product` (a name or a record id), `k` (1–5, default 3), `max_price` (UAH or null), `gender` (`men`, `women` or null; unisex always stays in) | `reference`: the card it compared with; `similar`: each match's card fields, `score`, `accords_similarity`, `notes_similarity`, `shared_notes` and `shared_accords`. How it ranks: [similar.md](similar.md) |
 
-Both tools take the run context as their first argument and reach the knowledge base through `TurnContext.kb`, a `KnowledgeBase` (`app/kb/knowledge_base.py`) built once on the app's OpenAI, Qdrant and Postgres clients. The record drawer in the web chat reads the same `kb_records` table through `GET /api/records/{id}`. With `HARDEN_UNTRUSTED_WRAP` on (the hardened default), a passage's `text` (breadcrumb included) and a record's `body` reach the model inside `<untrusted_data record="KB-…">` tags, through `TurnContext.security` (see [security.md](security.md)).
+The read tools take the run context as their first argument and reach the knowledge base through `TurnContext.kb`, a `KnowledgeBase` (`app/kb/knowledge_base.py`) built once on the app's OpenAI, Qdrant and Postgres clients. The record drawer in the web chat reads the same `kb_records` table through `GET /api/records/{id}`. With `HARDEN_UNTRUSTED_WRAP` on (the hardened default), a passage's `text` (breadcrumb included) and a record's `body` reach the model inside `<untrusted_data record="KB-…">` tags, through `TurnContext.security` (see [security.md](security.md)).
 
 ## Strict schemas
 
-The SDK builds each tool's JSON schema from its signature and docstring, in strict mode: every property is required (optional ones are nullable) and `additionalProperties` is `false`, so the model's arguments always match the schema, down to the 1–8 range of `k`. `GET /api/tools/schema` returns the schemas straight from the tools built for the signed-in customer, and the **Tools** button in the web chat shows them.
+The SDK builds each tool's JSON schema from its signature and docstring, in strict mode: every property is required (optional ones are nullable) and `additionalProperties` is `false`, so the model's arguments always match the schema, down to the 1–8 range of `k`. `GET /api/tools/schema` returns the schemas straight from the tools built for the signed-in customer.
 
 ## Notes and the bound user id
 
@@ -147,13 +149,13 @@ The web chat renders each citation as a chip that opens the full record. Invalid
 
 OpenAI caches the longest prefix a request shares with an earlier request under the same `prompt_cache_key`, and bills those tokens at a tenth of the input price. Writing a prefix to the cache costs 1.25× the input price. So the request has to start with what never changes and end with what always does. `RunConfig.call_model_input_filter` (`cacheable_input()` in `app/agent/input_filter.py`) orders every model call's input:
 
-1. The static prompt, from `instructions()` (`app/agent/prompts.py`): `AGENT_INSTRUCTIONS`, about 8 KB, plus the untrusted data rules (0.6 KB) when the wrapping is on. It is the same for every customer and every call, so the runner builds it once at startup, not per run. The API rejects an explicit cache breakpoint on the top-level `instructions`, so the filter sends the instructions as the first input item instead: a developer message whose `input_text` block has `prompt_cache_breakpoint: {"mode": "explicit"}`.
+1. The static prompt, from `instructions()` (`app/agent/prompts.py`): `AGENT_INSTRUCTIONS`, about 9 KB, plus the untrusted data rules (0.6 KB) when the wrapping is on. It is the same for every customer and every call, so the runner builds it once at startup, not per run. The API rejects an explicit cache breakpoint on the top-level `instructions`, so the filter sends the instructions as the first input item instead: a developer message whose `input_text` block has `prompt_cache_breakpoint: {"mode": "explicit"}`.
 2. The history and this turn's items: the customer's message, then the tool calls and outputs of this turn. Retrieved passages are tool outputs, so they come after the static prompt too.
 3. A developer note, always the last item: `Now: Tuesday, 20 October 2026, 15:42 Kyiv time. The customer's name is Mary.` The time is taken once per turn (`TurnContext.started_at`), so every call of a turn sends the same note. The shop's rules use Kyiv time and weekdays (courier cutoffs, support hours), so the note gives both.
 
 The filter only shapes what is sent. The SDK stores the history without the static prompt and the note, so the stored items never change. The tool schemas come before the input and don't depend on the customer either.
 
-Caching mode stays `implicit`: next to the explicit breakpoint, OpenAI puts one at the end of the newest user message or tool output. The note sits after it, so it never becomes part of a cached prefix. The next call, in this turn or the next one, reads everything up to that point and writes only what is new. The explicit breakpoint keeps the static prompt cached on its own, which still helps when the history window slides and the prefix after the prompt changes. The request's `prompt_cache_key` is `conversation:<id>`, so a conversation's first call can't read anything and writes the prefix instead, while a second call in the same turn already reads it; `/cost` explains that in a footnote.
+Caching mode stays `implicit`: next to the explicit breakpoint, OpenAI puts one at the end of the newest user message or tool output. The note sits after it, so it never becomes part of a cached prefix. The next call, in this turn or the next one, reads everything up to that point and writes only what is new. The explicit breakpoint keeps the static prompt cached on its own, which still helps when the history window slides and the prefix after the prompt changes. The request's `prompt_cache_key` is `conversation:<id>`, so a conversation's first call can't read anything and writes the prefix instead, while a second call in the same turn already reads it.
 
 ## Usage and cost
 
@@ -165,7 +167,7 @@ The transcript returns each reply's `usage`, summed per turn by the same `usage_
 
 ## `/cost`
 
-A message that is exactly `/cost` (any case) is a command, not a question. The route's `start_reply` dependency answers it before any turn starts: `cost_report()` (`app/services/cost_report.py`) builds a Markdown table from the conversation's finished turns and their usage, which `TurnStore.usage_by_turn()` sums from `llm_calls` in one `GROUP BY` query, with one row per turn (time in Kyiv, chat calls, input, cached, cache-write and output tokens, cost), the total, the share of input tokens read from the cache and a footnote on why turn 1 starts with a cache write. No model is called, no turn is stored, and nothing reaches the agent history. The command and the report go to the message log with `kind = command`, so the transcript shows them. That write is fail-open like the rest of the message log (`pg_guard`), so a database hiccup skips it and `/cost` still answers. The stream sends a single `done` with `turn_id: null`; `POST /api/chat` returns the same object. In a new chat there is nothing to count, so `/cost` answers that and creates nothing.
+A message that is exactly `/cost` (any case) is a command, not a question. The route's `start_reply` dependency answers it before any turn starts: `cost_report()` (`app/services/cost_report.py`) builds a Markdown table from the conversation's finished turns and their usage, which `TurnStore.usage_by_turn()` sums from `llm_calls` in one `GROUP BY` query, with one row per turn (time in Kyiv, chat calls, input, cached, cache-write and output tokens, cost), the total and the share of input tokens read from the cache. No model is called, no turn is stored, and nothing reaches the agent history. The command and the report go to the message log with `kind = command`, so the transcript shows them. That write is fail-open like the rest of the message log (`pg_guard`), so a database hiccup skips it and `/cost` still answers. The stream sends a single `done` with `turn_id: null`; `POST /api/chat` returns the same object. In a new chat there is nothing to count, so `/cost` answers that and creates nothing.
 
 ## What is stored
 

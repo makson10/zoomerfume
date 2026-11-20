@@ -17,13 +17,6 @@ HEADER = (
     "| # | Time | Calls | Input | Cached | Cache write | Output | Cost |\n"
     "|---:|---|---:|---:|---:|---:|---:|---:|"
 )
-FOOTNOTE = (
-    "Turn 1 starts with a cache write: each chat has its own cache key, so its first call "
-    "has nothing to read and writes the prompt and the message to the cache instead. Every "
-    "later call, in turn 1 or after it, reads what came before at a tenth of the input "
-    "price. Calls and tokens are the chat model's; the cost also covers the search "
-    "embeddings."
-)
 
 
 def _row(label: str, time: str, usage: TurnUsage) -> str:
@@ -58,14 +51,10 @@ def cost_report(turns: Sequence[Turn], usage: Mapping[uuid.UUID, TurnUsage]) -> 
     hit_rate = total.cached_tokens / total.input_tokens if total.input_tokens else 0
     return "\n".join(
         [
-            "**What this chat cost** (times in Kyiv)",
-            "",
             HEADER,
             *rows,
             _row("**Total**", "", total),
             "",
             f"{hit_rate:.0%} of the input tokens were read from the cache.",
-            "",
-            FOOTNOTE,
         ]
     )

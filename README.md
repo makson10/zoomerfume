@@ -2,7 +2,7 @@
 
 **Zoomer** is the AI shop assistant of **Zoomerfume**, a fictional Ukrainian online perfume shop. It recommends perfumes by taste, budget, occasion and season, compares products, answers shop questions (delivery, returns, payment, loyalty) and gives general perfume advice. The goal is a *grounded* assistant: answers about the shop come from a knowledge base the model searches through tools, with citations to the records it used, not from the model's memory.
 
-> **Status: early version.** The current version is a web chat with Zoomer on top of a streaming chat API. Customers sign in with a phone number and keep several conversations each. Zoomer looks things up in the shop's knowledge base (97 records: products, policies, FAQ, company pages, news) through two tools, `search_kb` and `open_record`, and cites the records it used. A third tool, `save_note`, keeps notes for the customer, such as a wishlist, and can only ever write for the signed-in customer. Replies stream in token by token and can be stopped. Citations show up as chips that open the full record, every answer has a step log of the tools it called and shows what it cost, and the notes panel shows the saved notes. The static system prompt is cached, and `/cost` prints what a conversation cost per turn. One knowledge base record carries a prompt injection on purpose: the default hardened mode stops it with three defenses, and a vulnerable mode shows the attack landing (see [Prompt-injection lab](#prompt-injection-lab)).
+> **Status: early version.** The current version is a web chat with Zoomer on top of a streaming chat API. Customers sign in with a phone number and keep several conversations each. Zoomer looks things up in the shop's knowledge base (97 records: products, policies, FAQ, company pages, news) through two tools, `search_kb` and `open_record`, and cites the records it used. Asked for something like a perfume, it calls `find_similar`, which ranks the catalog by vectors built from each product's notes and accords, with no model involved. A fourth tool, `save_note`, keeps notes for the customer, such as a wishlist, and can only ever write for the signed-in customer. Replies stream in token by token and can be stopped. Citations show up as chips that open the full record, every answer has a step log of the tools it called and shows what it cost, and the notes panel shows the saved notes. The static system prompt is cached, and `/cost` prints what a conversation cost per turn. One knowledge base record carries a prompt injection on purpose: the default hardened mode stops it with three defenses, and a vulnerable mode shows the attack landing (see [Prompt-injection lab](#prompt-injection-lab)).
 
 ## Stack
 
@@ -20,13 +20,13 @@ Browser (web chat)
    ▼
 api (FastAPI + Agents SDK) ─────► OpenAI (chat + embeddings)
    │        │
-   │        └───────────────────► Qdrant (knowledge-base vectors)
+   │        └───────────────────► Qdrant (knowledge-base and product vectors)
    ▼
 Postgres (users, conversations, agent history, turns and tool steps, message log, rate limits,
           knowledge base records, notes, model call costs)
 ```
 
-One Docker image runs the API and serves the built web chat. Postgres and Qdrant run as separate services. Before the API starts, the same image runs the database migrations and loads the knowledge base as two one-off Compose services. What Compose sets up (the network, DNS, volumes, startup order) and what survives a restart: [docs/compose.md](docs/compose.md). How a chat turn works (streaming, Stop, tools, notes, the error envelope, the 5-step cap, citations, prompt caching and costs): [docs/architecture.md](docs/architecture.md). The prompt-injection attack and the defenses against it: [docs/security.md](docs/security.md).
+One Docker image runs the API and serves the built web chat. Postgres and Qdrant run as separate services. Before the API starts, the same image runs the database migrations and loads the knowledge base as two one-off Compose services. What Compose sets up (the network, DNS, volumes, startup order) and what survives a restart: [docs/compose.md](docs/compose.md). How a chat turn works (streaming, Stop, tools, notes, the error envelope, the 5-step cap, citations, prompt caching and costs): [docs/architecture.md](docs/architecture.md). The prompt-injection attack and the defenses against it: [docs/security.md](docs/security.md). How the similar perfume search works: [docs/similar.md](docs/similar.md).
 
 ## Quick start (Docker)
 
@@ -43,7 +43,7 @@ docker compose up --build
 
 Open http://localhost:8000. Zoomer asks for your phone number, and for your name if the number is new. There is no SMS code, since the shop is fictional. Your conversations are listed on the left; "New chat" starts another one. Log out to switch to a different customer.
 
-Ask something like "vanilla and tobacco under 3,000 ₴?": while Zoomer searches you see which tool it is using, then the answer streams in. It cites records as chips (click one to read the full record), and the line under it shows which tools Zoomer used. A general question such as "EDP vs EDT?" shows "No tools used". Ask Zoomer to add a perfume to your wishlist: Zoomer proposes the note in a card under its answer, and **Save** puts it in the **Notes** panel on the right (behind the **Notes** button on smaller screens). The badge in the header shows the security mode the server runs in. The Stop button next to the message box stops a reply halfway; what Zoomer wrote so far stays. Under each answer you see what it cost, and typing `/cost` shows the whole conversation's cost per turn (see [Caching and cost](#caching-and-cost)). The **Tools** button shows the exact tool schemas the model receives.
+Ask something like "vanilla and tobacco under 3,000 ₴?": while Zoomer searches you see which tool it is using, then the answer streams in. It cites records as chips (click one to read the full record), and the line under it shows which tools Zoomer used. A general question such as "EDP vs EDT?" shows "No tools used". Ask Zoomer to add a perfume to your wishlist: Zoomer proposes the note in a card under its answer, and **Save** puts it in the **Notes** panel on the right (behind the **Notes** button on smaller screens). The badge in the header shows the security mode the server runs in. The Stop button next to the message box stops a reply halfway; what Zoomer wrote so far stays. Under each answer you see what it cost, and typing `/cost` shows the whole conversation's cost per turn (see [Caching and cost](#caching-and-cost)).
 
 `docker compose up` also loads `docker-compose.override.yml` (auto-reload, Postgres and Qdrant ports on `localhost`). Add `--watch` to sync backend code changes into the running container.
 
@@ -69,7 +69,7 @@ curl -b jar -X POST localhost:8000/api/chat \
 #    "usage": {"calls": 2, "input_tokens": 14967, "cached_tokens": 14725, ..., "cost_usd": "0.000200950"}}
 curl -b jar -X POST localhost:8000/api/chat \
   -H 'content-type: application/json' -d '{"conversation_id": "<conversation id>", "message": "/cost"}'
-# → {"turn_id": null, "reply": "**What this chat cost** ...| # | Time | Calls | ...", "status": "ok"}
+# → {"turn_id": null, "reply": "| # | Time | Calls | ...", "status": "ok"}
 curl -b jar localhost:8000/api/records/KB-026      # the cited record in full
 curl -b jar localhost:8000/api/notes               # the customer's notes, newest first; the new one is "pending"
 curl -b jar -X POST localhost:8000/api/notes/<note id>/confirm   # the customer saves it; /reject drops it
@@ -101,7 +101,7 @@ How Compose maps to Kubernetes, how the stack settles without `depends_on`, wher
 
 ## Why the model can never pass a user id
 
-`save_note` is the only tool that writes, and its schema has a single property, `text`. The **Tools** button (or `GET /api/tools/schema`) shows it exactly as the model receives it: strict mode, `additionalProperties: false`, no user id anywhere.
+`save_note` is the only tool that writes, and its schema has a single property, `text`. `GET /api/tools/schema` shows it exactly as the model receives it: strict mode, `additionalProperties: false`, no user id anywhere.
 
 The customer comes from the signed session cookie, never from the model. For every message, `build_tools(user_id)` (`backend/app/agent/tools/__init__.py`) builds `save_note` with the signed-in customer's id captured in a closure. The run context the tools share holds no user id, so the closure is the only way the tool knows whose note it writes. The schema doesn't change with the user, so every customer's model calls see identical tool definitions.
 
@@ -115,7 +115,7 @@ Every answer shows what it cost, e.g. "$0.00047 · 2 calls · 62% cached". Type 
 
 How the prompt gets cached:
 
-- The system prompt (`backend/app/agent/prompts.py`, about 8 KB or 1,900 tokens, plus a 0.6 KB section on untrusted data in hardened mode) is static: the same text for every customer and every call. With the tool schemas it is well over OpenAI's 1,024-token caching minimum.
+- The system prompt (`backend/app/agent/prompts.py`, about 9 KB or 2,100 tokens, plus a 0.6 KB section on untrusted data in hardened mode) is static: the same text for every customer and every call. With the tool schemas it is well over OpenAI's 1,024-token caching minimum.
 - It opens every request as a developer message with an explicit cache breakpoint (`prompt_cache_breakpoint`). The API doesn't allow a breakpoint on the top-level `instructions`, so the run's `call_model_input_filter` moves the instructions into the input.
 - Everything volatile comes last. The current Kyiv time and the customer's name are a developer note at the very end of each call's input, and the note is never stored. Search results are tool outputs in the history. So each request repeats the previous one up to its newest messages, and OpenAI's implicit breakpoint at the end of the newest user message or tool output lets the next call read all of it from the cache.
 - Every request carries `prompt_cache_key = conversation:<id>`, so each conversation has its own cache.
@@ -156,8 +156,9 @@ The knowledge base lives in `backend/corpus/`: one Markdown file per record. Zoo
 ```
 $ docker compose logs ingest
 Records: 97 total, 97 changed, 0 skipped, 0 deleted
-Chunks: 208 embedded, 78,163 tokens
-Qdrant kb_chunks: 208 points, 208 indexed vectors (HNSW)
+Chunks: 205 embedded, 73,119 tokens
+Qdrant kb_chunks: 205 points, 205 indexed vectors (HNSW)
+Qdrant products: 40 products stored (accord and note vectors)
 ```
 
 The corpus is part of the image, so after editing it run `docker compose up --build`. Unchanged records are skipped, so a re-run only embeds what changed. A full load costs well under one cent. To re-embed everything, or to see what would change:
@@ -175,6 +176,10 @@ docker compose exec api python -m app.eval.rephrase       # hit@1 / hit@5 on rep
 ```
 
 How chunking, the HNSW index and the rephrase check work, with results: [docs/retrieval.md](docs/retrieval.md).
+
+### Similar perfumes
+
+"Something like Creed Aventus, up to 4,000 ₴?" goes to `find_similar`. Every product card lists its note pyramid, and `backend/app/kb/notes.yaml` maps each brand's spelling of a note to one name and lists the accords the note brings in (woody, smoky, fruity…). On every run, ingest turns each product into a point in the Qdrant `products` collection with two vectors: a note vector, where rare notes like birch weigh more than common ones like vanilla (IDF), and an accord vector for the overall character. The tool finds the product by name (`pg_trgm` in Postgres), takes its nearest neighbours by both vectors with the price and gender filters, and ranks them by `0.6 · accord similarity + 0.4 · note similarity`, at most one per product line. It calls no model and costs nothing, and each match comes back with the notes and accords it shares, which Zoomer uses to explain it. Details and results: [docs/similar.md](docs/similar.md).
 
 ## Local development (without Docker for the API)
 
@@ -239,6 +244,7 @@ All settings come from environment variables (`.env` for local runs). See `.env.
 | `DB_PASSWORD` | (required) | Postgres password; the app and Compose refuse to start without it |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant connection |
 | `QDRANT_COLLECTION` | `kb_chunks` | Qdrant collection for the knowledge base |
+| `QDRANT_PRODUCTS_COLLECTION` | `products` | Qdrant collection for the similar perfume search |
 | `CORPUS_DIR` | `corpus` | Folder with the knowledge base records |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Model that embeds the knowledge base and search queries |
 | `MESSAGE_LOG_ENABLED` | `true` | Write every exchange to the `messages` table; the web chat loads transcripts from it |
@@ -261,7 +267,7 @@ zoomerfume/
 │   │   ├── core/         settings, logging, input validation, the security mode
 │   │   ├── db/           SQLAlchemy engine, models, message log
 │   │   ├── eval/         the prompt-injection and unanswerable question checks
-│   │   ├── kb/           knowledge base: parsing, chunking, ingest, search, checks
+│   │   ├── kb/           knowledge base: parsing, chunking, ingest, search, similar perfumes, checks
 │   │   ├── middleware/   request logging context, the X-Served-By header
 │   │   └── services/     OpenAI and Qdrant clients, users, conversations, rate limits, turns, notes, prices, usage, the /cost report, readiness checks
 │   ├── alembic/          database migrations
@@ -277,6 +283,7 @@ zoomerfume/
 ├── docs/retrieval.md             chunking, HNSW and retrieval results
 ├── docs/architecture.md          a chat turn: streaming, Stop, tools, notes, error envelope, step cap, citations, caching and costs
 ├── docs/security.md              the prompt-injection lab: the attack, three defenses, results, modes
+├── docs/similar.md               the similar perfume search: note dictionary, note and accord vectors, hybrid score
 ├── docs/compose.md               what Compose sets up: network, DNS, volumes, startup order, restart test
 ├── docs/k8s.md                   the kind cluster: Compose to Kubernetes, startup, DNS, the password, replicas
 ├── docs/k8s-breakages.md         five breakages: expected, actual, which kubectl command showed it

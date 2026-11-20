@@ -1,17 +1,17 @@
 import {
   ActionIcon,
   AppShell,
+  Badge,
   Box,
   Burger,
   Button,
-  Text,
   type MantineBreakpoint,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import {
   IconLogout,
   IconNotes,
-  IconTool,
+  IconUser,
   type TablerIcon,
 } from '@tabler/icons-react'
 import { useState } from 'react'
@@ -23,7 +23,9 @@ import { Header } from './Header.tsx'
 import { ModeBadge } from './ModeBadge.tsx'
 import { NotesPanel } from './NotesPanel.tsx'
 import { RecordDrawer } from './RecordDrawer.tsx'
-import { ToolsModal } from './ToolsModal.tsx'
+
+/** Both side panels share one width, so the chat stays centered between them. */
+const SIDE_PANEL_WIDTH = 280
 
 interface HeaderButtonProps {
   label: string
@@ -81,7 +83,6 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
   const chat = useChat()
   const [navbarOpened, navbar] = useDisclosure()
   const [notesOpened, notes] = useDisclosure()
-  const [toolsOpened, tools] = useDisclosure()
   const [recordId, setRecordId] = useState<string | null>(null)
 
   function toggleNavbar() {
@@ -108,12 +109,12 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
     <AppShell
       header={{ height: 60 }}
       navbar={{
-        width: 260,
+        width: SIDE_PANEL_WIDTH,
         breakpoint: 'sm',
         collapsed: { mobile: !navbarOpened },
       }}
       aside={{
-        width: 280,
+        width: SIDE_PANEL_WIDTH,
         breakpoint: 'md',
         collapsed: { mobile: !notesOpened },
       }}
@@ -134,20 +135,20 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
               <Box visibleFrom="md">
                 <ModeBadge security={user.security} />
               </Box>
-              <Text size="sm" visibleFrom="sm">
+              <Badge
+                color="gray"
+                variant="light"
+                leftSection={<IconUser size={12} />}
+                visibleFrom="sm"
+              >
                 {user.name}
-              </Text>
+              </Badge>
               <HeaderButton
                 label="Notes"
                 icon={IconNotes}
                 onClick={toggleNotes}
                 active={notesOpened}
                 hiddenFrom="md"
-              />
-              <HeaderButton
-                label="Tools"
-                icon={IconTool}
-                onClick={tools.open}
               />
               <HeaderButton
                 label="Log out"
@@ -190,7 +191,6 @@ export function ChatPage({ user, greeting, onLogOut }: ChatPageProps) {
         />
       </AppShell.Main>
       <RecordDrawer recordId={recordId} onClose={() => setRecordId(null)} />
-      <ToolsModal opened={toolsOpened} onClose={tools.close} />
     </AppShell>
   )
 }

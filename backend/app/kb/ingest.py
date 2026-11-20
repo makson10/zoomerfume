@@ -4,7 +4,9 @@
 
 A record whose file hasn't changed since the last run is skipped, so a re-run embeds
 nothing. Records removed from the corpus are deleted from both stores. A run that embeds
-something records its usage and cost in ``llm_calls``.
+something records its usage and cost in ``llm_calls``. Every run also rebuilds the products
+collection for the similar perfume search: its note weights depend on the whole catalog,
+and it calls no API.
 """
 
 from __future__ import annotations
@@ -21,7 +23,9 @@ from app.db.engine import create_db_engine
 from app.kb.chunking import chunk_record, count_tokens
 from app.kb.corpus import load_corpus
 from app.kb.embeddings import embed_texts
+from app.kb.products import ensure_products_collection, replace_products
 from app.kb.records import delete_records, save_record, stored_hashes
+from app.kb.scent import NoteDictionary, build_vectors
 from app.kb.store import (
     delete_record_chunks,
     ensure_collection,
@@ -41,6 +45,8 @@ class IngestSummary:
     deleted: int
     chunks: int
     tokens: int
+    # Products with vectors for the similar perfume search.
+    products: int
     points: int | None = None
     indexed: int | None = None
 
@@ -48,7 +54,8 @@ class IngestSummary:
 async def ingest(
     settings: Settings, *, force: bool = False, dry_run: bool = False
 ) -> IngestSummary:
-    """Embed new and changed records, and delete records that left the corpus.
+    """Embed new and changed records, delete records that left the corpus, and rebuild the
+    products collection.
 
     Args:
         settings: The app settings (corpus folder, Qdrant collection, embedding model).
@@ -57,6 +64,9 @@ async def ingest(
             token count is our own estimate.
     """
     records = load_corpus(settings.corpus_dir)
+    dictionary = NoteDictionary.load()
+    products = [record.header for record in records if record.header.type == "product"]
+    scents = build_vectors(products, dictionary)
     engine = create_db_engine(settings)
     collection = settings.qdrant_collection
     try:
@@ -80,6 +90,7 @@ async def ingest(
                 deleted=len(removed),
                 chunks=sum(len(chunks) for _, chunks in chunked),
                 tokens=0,
+                products=len(scents),
             )
             if dry_run:
                 summary.tokens = sum(
@@ -106,6 +117,10 @@ async def ingest(
                 await delete_record_chunks(qdrant, collection, record_id)
             await delete_records(session, removed)
             await session.commit()
+
+            products_collection = settings.qdrant_products_collection
+            await ensure_products_collection(qdrant, products_collection, len(dictionary.accords))
+            await replace_products(qdrant, products_collection, products, scents)
 
             info = await wait_until_indexed(qdrant, collection)
     finally:
@@ -139,6 +154,11 @@ def main() -> None:
             f"Qdrant {settings.qdrant_collection}: {summary.points} points, "
             f"{summary.indexed} indexed vectors (HNSW)"
         )
+    stored = "would store" if args.dry_run else "stored"
+    print(
+        f"Qdrant {settings.qdrant_products_collection}: {summary.products} products {stored} "
+        "(accord and note vectors)"
+    )
 
 
 if __name__ == "__main__":
