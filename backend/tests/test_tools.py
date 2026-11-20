@@ -10,11 +10,18 @@ from agents.tool_context import ToolContext
 from fastapi.testclient import TestClient
 
 from app.agent.context import PendingNote, TurnContext
-from app.agent.tools import build_tools, open_record, search_kb
+from app.agent.tools import build_tools, find_similar, open_record, search_kb
 from app.agent.tools.save_note import make_save_note
 from app.core.security import SecurityPolicy
 from app.db.models import KbRecord, User
-from tests.fakes import HARDENED, VULNERABLE, FakeKnowledgeBase, FakeNoteStore, make_hit
+from tests.fakes import (
+    HARDENED,
+    VULNERABLE,
+    FakeKnowledgeBase,
+    FakeNoteStore,
+    make_hit,
+    make_similar,
+)
 
 
 @pytest.fixture
@@ -90,6 +97,35 @@ async def test_open_record_fails_with_an_error_code(
     assert result["code"] == code
     assert record_id in result["message"]
     assert (ctx.steps[0].success, ctx.steps[0].code) == (False, code)
+
+
+async def test_find_similar_returns_the_matches_and_their_records(
+    ctx: TurnContext, fake_kb: FakeKnowledgeBase
+) -> None:
+    fake_kb.records["KB-028"] = KbRecord(id="KB-028", type="product", title="Creed Aventus")
+    fake_kb.similar = [make_similar("KB-039"), make_similar("KB-030"), make_similar("KB-031")]
+
+    result = await call_tool(
+        find_similar, ctx, product="Creed Aventus", k=2, max_price=4000, gender="men"
+    )
+
+    assert result["success"] is True
+    assert result["data"]["reference"] == {"record_id": "KB-028", "title": "Creed Aventus"}
+    similar = result["data"]["similar"]
+    assert [match["record_id"] for match in similar] == ["KB-039", "KB-030"]
+    assert similar[0]["shared_notes"] == ["birch", "pineapple"]
+    assert fake_kb.similar_searches == [("KB-028", 2, 4000, "men")]
+    assert ctx.steps[0].record_ids == ["KB-028", "KB-039", "KB-030"]
+
+
+async def test_find_similar_fails_for_a_product_we_dont_sell(
+    ctx: TurnContext, fake_kb: FakeKnowledgeBase
+) -> None:
+    result = await call_tool(find_similar, ctx, product="Some Perfume")
+
+    assert (result["success"], result["code"]) == (False, "NOT_FOUND")
+    assert "Some Perfume" in result["message"]
+    assert fake_kb.similar_searches == []
 
 
 async def test_read_tools_wrap_record_text_as_untrusted_data(
@@ -197,15 +233,22 @@ def test_schema_endpoint_lists_the_tools_with_strict_schemas(
 ) -> None:
     schemas = client.get("/api/tools/schema").json()
 
-    assert [schema["name"] for schema in schemas] == ["search_kb", "open_record", "save_note"]
+    assert [schema["name"] for schema in schemas] == [
+        "search_kb",
+        "open_record",
+        "find_similar",
+        "save_note",
+    ]
     for schema in schemas:
         assert schema["strict"] is True
         assert schema["parameters"]["additionalProperties"] is False
     k = schemas[0]["parameters"]["properties"]["k"]
     assert (k["minimum"], k["maximum"]) == (1, 8)
     assert list(schemas[1]["parameters"]["properties"]) == ["record_id"]
-    assert list(schemas[2]["parameters"]["properties"]) == ["text"]
-    assert schemas[2]["parameters"]["required"] == ["text"]
+    gender = schemas[2]["parameters"]["properties"]["gender"]
+    assert gender["anyOf"][0]["enum"] == ["men", "women"]
+    assert list(schemas[3]["parameters"]["properties"]) == ["text"]
+    assert schemas[3]["parameters"]["required"] == ["text"]
 
 
 def test_tool_schemas_are_the_same_for_every_user() -> None:
