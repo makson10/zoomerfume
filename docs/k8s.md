@@ -75,7 +75,7 @@ Unhealthy          pod/api-…        Readiness probe failed: connection refused
 Unhealthy          pod/postgres-…   Readiness probe failed: no response
 Completed          job/migrate      (28 s, after 2 restarts)
 Unhealthy          pod/api-…        Readiness probe failed: statuscode: 503   (no knowledge base yet)
-Completed          job/ingest       (37 s, after 2 restarts: 208 chunks embedded)
+Completed          job/ingest       (37 s, after 2 restarts: 205 chunks embedded)
                    deployment "api" successfully rolled out: 3/3 ready
 ```
 

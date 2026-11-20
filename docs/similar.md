@@ -33,7 +33,7 @@ notes:
   base: [birch, patchouli, musk]
 ```
 
-A brand that names key notes instead of a pyramid (Le Labo, Tom Ford, Maison Francis Kurkdjian) gets a `key:` list. `RecordHeader` requires both fields on every product.
+A brand that names key notes instead of a pyramid (Le Labo, Tom Ford, Maison Francis Kurkdjian) gets a `key:` list. `RecordHeader` requires both fields on every product. The cards have no hand-written lists of similar perfumes: `find_similar` is the only source, so a search passage can't contradict it.
 
 ## The note dictionary
 

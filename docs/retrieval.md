@@ -4,7 +4,7 @@ How the knowledge base gets from Markdown files into Qdrant, how search works, a
 
 ## The corpus
 
-`backend/corpus/` holds 97 records, one Markdown file each (`KB-001.md` … `KB-097.md`): 40 product cards, 19 policies, 8 company pages, 20 FAQ answers and 10 news posts, about 46,000 words. KB-097 is the poisoned record of the prompt-injection lab ([security.md](security.md)). Every file starts with a YAML header, followed by a Markdown body split into `##` sections.
+`backend/corpus/` holds 97 records, one Markdown file each (`KB-001.md` … `KB-097.md`): 40 product cards, 19 policies, 8 company pages, 20 FAQ answers and 10 news posts, about 43,000 words. KB-097 is the poisoned record of the prompt-injection lab ([security.md](security.md)). Every file starts with a YAML header, followed by a Markdown body split into `##` sections.
 
 ```yaml
 ---
@@ -44,17 +44,17 @@ Records link to each other as plain IDs ("see KB-052"). Zoomer cites as `[KB-052
 4. Every chunk after the first starts with the last ~75 tokens (about 15%) of the chunk before it, cut at a line, sentence or word boundary. A fact near a boundary can then be found from either side.
 5. Each chunk gets a breadcrumb such as `Creed Aventus › Notes, How it wears`. The breadcrumb is embedded together with the chunk text, so a chunk deep in a record still carries the record's subject.
 
-The result is deterministic: the same file always gives the same chunks. The full corpus gives 208 chunks, 78–494 tokens each (median 370), 78,163 tokens to embed. With `text-embedding-3-small` at $0.02 per million tokens, a full ingest costs about $0.0016.
+The result is deterministic: the same file always gives the same chunks. The full corpus gives 205 chunks, 78–490 tokens each (median 354), 73,119 tokens to embed. With `text-embedding-3-small` at $0.02 per million tokens, a full ingest costs about $0.0015.
 
 We tried packing less. With the same 500-token limit, sections were only merged while the chunk stayed under a smaller budget:
 
 | Packing budget | Chunks | hit@1 | hit@5 |
 |---|---|---|---|
-| up to ~500 tokens (current) | 208 | 15/20 | 19/20 |
-| up to 250 tokens | 367 | 14/20 | 17/20 |
-| up to 150 tokens | 587 | 16/20 | 18/20 |
+| up to ~500 tokens (current) | 205 | 15/20 | 19/20 |
+| up to 250 tokens | 333 | 15/20 | 17/20 |
+| up to 150 tokens | 552 | 16/20 | 18/20 |
 
-Smaller chunks didn't help: they found the right record first slightly more often, but more often lost it altogether, and they tripled the number of points. Whole sections packed up to the limit keep enough context in each chunk.
+Smaller chunks didn't help: the smallest found the right record first once more, but both lost it altogether more often, and the smallest nearly tripled the number of points. Whole sections packed up to the limit keep enough context in each chunk.
 
 ## Embeddings and Qdrant
 
@@ -81,7 +81,7 @@ The proof is `indexed_vectors_count` in the collection info. We loaded the same 
 curl -s localhost:6333/collections/kb_chunks | jq '.result | {status, points_count, indexed_vectors_count}'
 ```
 
-The ingest command waits until Qdrant has finished building the index and prints both numbers. On a fresh collection the two numbers are equal. After any re-embed or delete (`--force`, a changed or removed record), `indexed_vectors_count` is higher than `points_count` and stays that way: replaced and deleted vectors remain in the index, and Qdrant vacuums only segments with at least 1,000 vectors (`vacuum_min_vector_number`), more than this whole collection. A `--force` run, for example, leaves 208 points and more indexed vectors than that. Search is not affected, because deleted vectors are never returned.
+The ingest command waits until Qdrant has finished building the index and prints both numbers. On a fresh collection the two numbers are equal. After any re-embed or delete (`--force`, a changed or removed record), `indexed_vectors_count` is higher than `points_count` and stays that way: replaced and deleted vectors remain in the index, and Qdrant vacuums only segments with at least 1,000 vectors (`vacuum_min_vector_number`), more than this whole collection. A `--force` run, for example, leaves 205 points and more indexed vectors than that. Search is not affected, because deleted vectors are never returned.
 
 A filtered search that leaves only a few points, for example only products under 3,000 ₴, may be answered by checking those points exactly instead of walking the graph. Qdrant's query planner decides this, and for a corpus this small it's the faster path.
 
@@ -98,13 +98,13 @@ A second run right after the first embeds nothing:
 
 ```
 Records: 97 total, 97 changed, 0 skipped, 0 deleted
-Chunks: 208 embedded, 78,163 tokens
-Qdrant kb_chunks: 208 points, 208 indexed vectors (HNSW)
+Chunks: 205 embedded, 73,119 tokens
+Qdrant kb_chunks: 205 points, 205 indexed vectors (HNSW)
 Qdrant products: 40 products stored (accord and note vectors)
 
 Records: 97 total, 0 changed, 97 skipped, 0 deleted
 Chunks: 0 embedded, 0 tokens
-Qdrant kb_chunks: 208 points, 208 indexed vectors (HNSW)
+Qdrant kb_chunks: 205 points, 205 indexed vectors (HNSW)
 Qdrant products: 40 products stored (accord and note vectors)
 ```
 
@@ -118,9 +118,9 @@ Qdrant products: 40 products stored (accord and note vectors)
 
 ```bash
 python -m app.kb.search "vanilla and tobacco" --type product --max-price 3000 -k 3
-1. 0.476  KB-026  Maison Margiela Replica Jazz Club › Zoomer's take, Sizes and prices, Similar in our shop · from 2,490 ₴
+1. 0.454  KB-026  Maison Margiela Replica Jazz Club › Zoomer's take, Sizes and prices · from 2,490 ₴
 2. 0.438  KB-026  Maison Margiela Replica Jazz Club › Overview, Notes, How it wears, Who it's for · from 2,490 ₴
-3. 0.393  KB-025  Maison Margiela Replica By the Fireplace › Who it's for, Zoomer's take, Sizes and prices, Similar in our shop · from 2,990 ₴
+3. 0.352  KB-025  Maison Margiela Replica By the Fireplace › Overview, Notes, How it wears · from 2,990 ₴
 ```
 
 ## The rephrase check
@@ -146,11 +146,11 @@ A search that only matches words isn't enough: customers rarely use the words a 
 | 13 | do you use a lot of plastic when you mail stuff? | KB-066 | 1 | KB-066 (0.43) |
 | 14 | if something isn't in stock yet, can I reserve it? | KB-054, KB-085 | 1 | KB-085 (0.48) |
 | 15 | which city do my packages come from? | KB-062 | 1 | KB-062 (0.34) |
-| 16 | something that smells like an old bar with a cigar and a drink? | KB-026 | 1 | KB-026 (0.43) |
+| 16 | something that smells like an old bar with a cigar and a drink? | KB-026 | 1 | KB-026 (0.42) |
 | 17 | a scent like sitting next to burning logs in winter | KB-025 | 1 | KB-025 (0.51) |
-| 18 | something that smells like a cold stream in the Alps | KB-029 | 1 | KB-029 (0.43) |
-| 19 | which one smells a bit different on everyone, like your own skin but better? | KB-027 | 1 | KB-027 (0.48) |
-| 20 | something light and happy for a teenage girl's first bottle | KB-020 | 3 | KB-038 (0.39) |
+| 18 | something that smells like a cold stream in the Alps | KB-029 | 1 | KB-029 (0.42) |
+| 19 | which one smells a bit different on everyone, like your own skin but better? | KB-027 | 1 | KB-027 (0.46) |
+| 20 | something light and happy for a teenage girl's first bottle | KB-020 | 2 | KB-038 (0.41) |
 
 **hit@1: 15/20 (75%) · hit@5: 19/20 (95%).** The target is met.
 
@@ -158,4 +158,4 @@ What the misses and near-misses show:
 
 - **#6, the miss.** "Late" pulls the search to "My parcel is late" (KB-074), and "go out today" sits closer to the Kyiv courier pages than to the dispatch rule in KB-041 ("orders paid by 15:00 Monday–Friday leave the warehouse the same day"). The warehouse page KB-062 also states the cut-off and comes 4th, but it wasn't in the expected list, and we don't change the list after a run. None of the smaller chunk sizes above fixed it either.
 - **#4 and #11.** One word wins over the meaning: "birthday" pulls up the birthday sale news (KB-094), and "bonus" pulls up the gift card and points FAQ (KB-084). The right record is still second.
-- **#20.** The top hit, Lattafa Yara, is a reasonable answer too: a soft, sweet scent at 1,290 ₴. Daisy comes third.
+- **#20.** The top hit, Lattafa Yara, is a reasonable answer too: a soft, sweet scent at 1,290 ₴. Daisy comes second.

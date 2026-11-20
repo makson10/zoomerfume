@@ -156,8 +156,8 @@ The knowledge base lives in `backend/corpus/`: one Markdown file per record. Zoo
 ```
 $ docker compose logs ingest
 Records: 97 total, 97 changed, 0 skipped, 0 deleted
-Chunks: 208 embedded, 78,163 tokens
-Qdrant kb_chunks: 208 points, 208 indexed vectors (HNSW)
+Chunks: 205 embedded, 73,119 tokens
+Qdrant kb_chunks: 205 points, 205 indexed vectors (HNSW)
 Qdrant products: 40 products stored (accord and note vectors)
 ```
 
